@@ -6,6 +6,7 @@ ROS node to control the Kinova Gen3 robot arm with a Robotiq 2F-85 gripper using
 
 import rospy
 import tf2_ros
+import tf
 from geometry_msgs.msg import PoseStamped
 from sensor_msgs.msg import Range
 from std_msgs.msg import Empty
@@ -19,8 +20,8 @@ import sys
 DEFAULT_ROBOT_NAME = "my_gen3"
 DEFAULT_ARM_GROUP_NAME = "arm"
 DEFAULT_HAND =  "/leapmotion/hands/right"
-ROBOT_MAX_ACCELERATION = 0.1
-ROBOT_MAX_VELOCITY = 0.7
+ROBOT_MAX_ACCELERATION = 0.2
+ROBOT_MAX_VELOCITY = 0.9
 
 '''
 Tool pose at home
@@ -73,18 +74,13 @@ class KinovaTeleop(object):
         self.sub_arm_state = rospy.Subscriber('/' + self.robot_name + '/base_feedback', BaseCyclic_Feedback, self.arm_state_callback)
         #self.sub_gripper_state = rospy.Subscriber('/' + self.robot_name + '/gripper_state', Range, self.gripper_state_callback)
 
-        self.smooth_stop = rospy.Publisher('/' + self.robot_name + '/in/stop', Empty, queue_size=10)
-        self.emergency_stop = rospy.Publisher('/' + self.robot_name + '/in/emergency_stop', Empty, queue_size=10)
-        self.clear_faults = rospy.Publisher('/' + self.robot_name + '/in/clear_faults', Empty, queue_size=10)
-
-
         # Check if the robot is simulated in Gazebo
         self.is_simulation = False #rospy.get_param('~gazebo', False)
         # Create publisher for cartesian velocity commands
         if not self.is_simulation:
-            self.pub_arm_vel = rospy.Publisher('/' + self.robot_name + '/in/cartesian_velocity', TwistCommand, queue_size=10)
+            self.pub_arm_vel = rospy.Publisher('/' + self.robot_name + '/in/cartesian_velocity', TwistCommand, queue_size=1)
         else:
-            self.pub_arm_vel = rospy.Publisher('/' + self.robot_name + '//base/play_cartesian_trajectory', PlayCartesianTrajectoryGoal, queue_size=10)
+            self.pub_arm_vel = rospy.Publisher('/' + self.robot_name + '//base/play_cartesian_trajectory', PlayCartesianTrajectoryGoal, queue_size=1)
 
         # Create publisher for gripper commands
         #self.pub_gripper = rospy.Publisher('/' + self.robot_name + '/robotiq_2f_85_gripper_controller/gripper_cmd/goal ', GripperCommandActionGoal, queue_size=10)
@@ -95,7 +91,7 @@ class KinovaTeleop(object):
         self.last_arm_state = None
 
         # Setup the rate for the main loop
-        self.rate = rospy.Rate(10)
+        self.rate = rospy.Rate(40)
 
         # Handle user keyboard interrupt properly
         rospy.on_shutdown(self.signal_term_handler)
@@ -105,16 +101,31 @@ class KinovaTeleop(object):
         '''Handles KeyboardInterrupts to ensure smooth exit'''
         rospy.loginfo('User Keyboard interrupt. Going home...')
         # Try to go home
-        if self.go_home():
-            rospy.loginfo('Went home successfully')
+        max_acc = ROBOT_MAX_ACCELERATION
+        max_vel = ROBOT_MAX_VELOCITY
+        is_home = False
+        while not is_home and max_acc >= 0.01:
+            rospy.loginfo("Trying to go home (max_acc=" + str(max_acc) + ", max_vel=" + str(max_vel) + ")")
+            is_home = self.go_home()
+            # Next time try with half the acceleration
+            max_acc = max_acc / 2
+            max_vel = max_vel / 2
+            self.moveit_arm_group.set_max_acceleration_scaling_factor(max_acc)
+            self.moveit_arm_group.set_max_velocity_scaling_factor(max_vel)
+
+        if not is_home:
+            rospy.logerr("Failed to go home")
         else:
-            rospy.logerr('Failed to go home')
+            rospy.loginfo("Went home successfully")
+
         # Stop the arm
         rospy.loginfo('Stopping the arm and shutting down...')
         self.stop()
 
     def leap_to_arm_workspace(self, hand_pose):
         '''Transform the hand position and orientation to the robot workspace'''
+
+        # Adjust the origin of the hand pose
         hand_pose.position.x = hand_pose.position.x + 0.57802
         hand_pose.position.y = hand_pose.position.y + 0.00705
         hand_pose.position.z = (hand_pose.position.z - 0.35) + 0.42327
@@ -173,14 +184,35 @@ class KinovaTeleop(object):
             #gripper_state = self.last_gripper_state
 
             # Calculate the velocity command to move the arm to the hand position
+            vel_scale_factor = 5.0
             arm_vel = TwistCommand()
             arm_vel.reference_frame = 0
-            arm_vel.twist.linear_x = (hand_pose.position.x - arm_state.base.tool_pose_x) * ROBOT_MAX_VELOCITY
-            arm_vel.twist.linear_y = (hand_pose.position.y - arm_state.base.tool_pose_y) * ROBOT_MAX_VELOCITY
-            arm_vel.twist.linear_z = (hand_pose.position.z - arm_state.base.tool_pose_z) * ROBOT_MAX_VELOCITY
-            arm_vel.twist.angular_x = 0
-            arm_vel.twist.angular_y = 0
-            arm_vel.twist.angular_z = 0
+            # Linear velocity in m/s
+            arm_vel.twist.linear_x = (hand_pose.position.x - arm_state.base.tool_pose_x) * vel_scale_factor
+            arm_vel.twist.linear_y = (hand_pose.position.y - arm_state.base.tool_pose_y) * vel_scale_factor
+            arm_vel.twist.linear_z = (hand_pose.position.z - arm_state.base.tool_pose_z) * vel_scale_factor
+            
+            # Convert orientation from quaternion to euler angles
+            q = [hand_pose.orientation.x, hand_pose.orientation.y, hand_pose.orientation.z, hand_pose.orientation.w]
+            hand_theta_x, hand_theta_y, hand_theta_z = tf.transformations.euler_from_quaternion(q)
+
+            # Add correction to the orientation of the hand
+            hand_theta_x = - hand_theta_x 
+            hand_theta_y = hand_theta_y + np.pi/2
+            hand_theta_z = hand_theta_z + np.pi/2
+
+            # Get enf effector orientation in euler
+            arm_state_theta_x = np.radians(arm_state.base.tool_pose_theta_x)
+            arm_state_theta_y = np.radians(arm_state.base.tool_pose_theta_y)
+            arm_state_theta_z = np.radians(arm_state.base.tool_pose_theta_z)
+
+            #rospy.loginfo("Hand theta x " + str(hand_theta_x) + " -- arm theta y " + str(arm_state_theta_y))
+            #rospy.loginfo("Hand theta z " + str(hand_theta_z) + " -- arm theta z " + str(arm_state_theta_z))
+            #rospy.loginfo("Hand theta y " + str(hand_theta_y) + " -- arm theta x " + str(arm_state_theta_x))
+            
+            arm_vel.twist.angular_x = (hand_theta_y - arm_state_theta_x) * vel_scale_factor
+            arm_vel.twist.angular_y = (hand_theta_z - arm_state_theta_z) * vel_scale_factor
+            arm_vel.twist.angular_z = - (hand_theta_x - arm_state_theta_y) * vel_scale_factor
 
             # Publish the velocity command
             self.pub_arm_vel.publish(arm_vel)
