@@ -15,12 +15,10 @@ import moveit_commander
 import moveit_msgs.msg
 import numpy as np
 import sys
-import signal
-
 
 DEFAULT_ROBOT_NAME = "my_gen3"
 DEFAULT_ARM_GROUP_NAME = "arm"
-DEFAULT_HAND =  "/hands/right"
+DEFAULT_HAND =  "/leapmotion/hands/right"
 
 '''
 Tool pose at home
@@ -37,7 +35,7 @@ pose_z: 0.35 (max is around 0.7)
 class KinovaTeleop(object):
     def __init__(self):
         self.robot_name = rospy.get_param('~robot_name', DEFAULT_ROBOT_NAME)
-        rospy.init_node('kinova_teleop_' +  self.robot_name)
+        rospy.init_node('kinova_teleop_' +  self.robot_name, anonymous=True)
 
         # Create the MoveItInterface necessary objects
         arm_group_name = rospy.get_param(rospy.get_namespace() + "arm_group_name", DEFAULT_ARM_GROUP_NAME)
@@ -97,15 +95,21 @@ class KinovaTeleop(object):
         # Setup the rate for the main loop
         self.rate = rospy.Rate(10)
 
-        signal.signal(signal.SIGINT, self.signal_term_handler) # Needed to handle Ctrl+C properly
+        # Handle user keyboard interrupt properly
+        rospy.on_shutdown(self.signal_term_handler)
     
 
-    def signal_term_handler(self, signal, frame):
+    def signal_term_handler(self):
         '''Handles KeyboardInterrupts to ensure smooth exit'''
-        rospy.logwarn('User Keyboard interrupt')
-        self.go_home()
-        sys.exit(0)
-
+        rospy.loginfo('User Keyboard interrupt. Going home...')
+        # Try to go home
+        if self.go_home():
+            rospy.loginfo('Went home successfully')
+        else:
+            rospy.logerr('Failed to go home')
+        # Stop the arm
+        rospy.loginfo('Stopping the arm and shutting down...')
+        self.stop()
 
     def leap_to_arm_workspace(self, hand_pose):
         '''Transform the hand position and orientation to the robot workspace'''
@@ -121,7 +125,7 @@ class KinovaTeleop(object):
 
         # Wait for the arm state to be received
         while self.last_arm_state is None:
-            rospy.loginfo("Waiting for arm state...")
+            rospy.loginfo_throttle(10, "Waiting for arm state...")
             self.rate.sleep()
         # Go home
         if not self.go_home():
@@ -134,10 +138,12 @@ class KinovaTeleop(object):
             grab_state = self.last_grab_state
 
             if hand_pose is None or grab_state is None:
-                rospy.loginfo("Waiting for hand pose...")
+                rospy.loginfo_throttle(10, "Waiting for hand pose...")
                 self.stop()
                 self.rate.sleep()
                 continue
+
+            rospy.loginfo_throttle(60, "Sending velocity commands to the arm...")
 
             # Get the current arm state
             arm_state = self.last_arm_state
@@ -239,12 +245,6 @@ class KinovaTeleop(object):
         arm_vel.twist.angular_y = 0
         arm_vel.twist.angular_z = 0
         self.pub_arm_vel.publish(arm_vel)
-                
-
-    def __del__(self):
-        '''Destructor goes to home position when the node is killed'''
-        rospy.loginfo("Teleop node is shutting down...")
-        self.go_home()
 
 
 if __name__ == '__main__':
