@@ -19,7 +19,7 @@ import sys
 DEFAULT_ROBOT_NAME = "my_gen3"
 DEFAULT_ARM_GROUP_NAME = "arm"
 DEFAULT_HAND =  "/leapmotion/hands/right"
-ROBOT_MAX_ACCELERATION = 0.2
+ROBOT_MAX_ACCELERATION = 0.1
 ROBOT_MAX_VELOCITY = 0.7
 
 '''
@@ -121,6 +121,11 @@ class KinovaTeleop(object):
 
         return hand_pose
     
+
+    def mismatch_hand_arm(self, hand_pose, arm_state):
+        '''Check if the hand pose is aligned with the arm state. Returns the euclidean distance between the two'''
+        return np.sqrt((hand_pose.position.x - arm_state.base.tool_pose_x)**2 + (hand_pose.position.y - arm_state.base.tool_pose_y)**2 + (hand_pose.position.z - arm_state.base.tool_pose_z)**2)
+    
     
     def run(self):
         '''Main loop to control the arm'''
@@ -139,23 +144,33 @@ class KinovaTeleop(object):
             hand_pose = self.last_hand_pose
             grab_state = self.last_grab_state
 
+            # Check if the hand pose is received
             if hand_pose is None or grab_state is None:
                 rospy.loginfo_throttle(10, "Waiting for hand pose...")
                 self.stop()
                 self.rate.sleep()
                 continue
 
-            rospy.loginfo_throttle(60, "Sending velocity commands to the arm...")
-
             # Get the current arm state
             arm_state = self.last_arm_state
-
-            # Get the current gripper state
-            #gripper_state = self.last_gripper_state
 
             # Transform the hand position and orientation to the base frame
             hand_pose = self.leap_to_arm_workspace(hand_pose)
 
+            # Check that the hand pose is aligned with the current arm state
+            diff = self.mismatch_hand_arm(hand_pose, arm_state)
+            # rospy.loginfo("Mismatch between hand and arm: " + str(diff) + " m")
+            if diff > 0.3:
+                rospy.loginfo_throttle(1, "Waiting for hand pose to align with arm...")
+                self.rate.sleep()
+                self.stop()
+                continue
+
+            # All good to send velocity commands
+            rospy.loginfo_throttle(60, "Sending velocity commands to the arm...")
+    
+            # Get the current gripper state
+            #gripper_state = self.last_gripper_state
 
             # Calculate the velocity command to move the arm to the hand position
             arm_vel = TwistCommand()
