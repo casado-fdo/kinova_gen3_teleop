@@ -19,6 +19,8 @@ import sys
 DEFAULT_ROBOT_NAME = "my_gen3"
 DEFAULT_ARM_GROUP_NAME = "arm"
 DEFAULT_HAND =  "/leapmotion/hands/right"
+ROBOT_MAX_ACCELERATION = 0.2
+ROBOT_MAX_VELOCITY = 0.7
 
 '''
 Tool pose at home
@@ -47,8 +49,8 @@ class KinovaTeleop(object):
                                                         moveit_msgs.msg.DisplayTrajectory,
                                                         queue_size=20)
         # Limit velocity and acceleration
-        self.moveit_arm_group.set_max_velocity_scaling_factor(0.8)
-        self.moveit_arm_group.set_max_acceleration_scaling_factor(0.2)
+        self.moveit_arm_group.set_max_velocity_scaling_factor(ROBOT_MAX_VELOCITY)
+        self.moveit_arm_group.set_max_acceleration_scaling_factor(ROBOT_MAX_ACCELERATION)
 
         self.is_gripper_present = rospy.get_param(rospy.get_namespace() + "is_gripper_present", False)
         if self.is_gripper_present:
@@ -158,9 +160,9 @@ class KinovaTeleop(object):
             # Calculate the velocity command to move the arm to the hand position
             arm_vel = TwistCommand()
             arm_vel.reference_frame = 0
-            arm_vel.twist.linear_x = (hand_pose.position.x - arm_state.base.tool_pose_x) * 0.8
-            arm_vel.twist.linear_y = (hand_pose.position.y - arm_state.base.tool_pose_y) * 0.8
-            arm_vel.twist.linear_z = (hand_pose.position.z - arm_state.base.tool_pose_z) * 0.8
+            arm_vel.twist.linear_x = (hand_pose.position.x - arm_state.base.tool_pose_x) * ROBOT_MAX_VELOCITY
+            arm_vel.twist.linear_y = (hand_pose.position.y - arm_state.base.tool_pose_y) * ROBOT_MAX_VELOCITY
+            arm_vel.twist.linear_z = (hand_pose.position.z - arm_state.base.tool_pose_z) * ROBOT_MAX_VELOCITY
             arm_vel.twist.angular_x = 0
             arm_vel.twist.angular_y = 0
             arm_vel.twist.angular_z = 0
