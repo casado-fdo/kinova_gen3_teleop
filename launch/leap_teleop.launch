@@ -5,6 +5,6 @@
     <arg name="start_delay_seconds" default="0"/>
 
     <!-- Launch the example in that namespace -->
-    <node name="leap_teleop" pkg="kortex_driver" type="leap_teleop.py" ns="$(arg robot_name)" output="screen" launch-prefix="bash -c 'sleep $(arg start_delay_seconds); $0 $@' "/>
+    <node name="leap_teleop" pkg="kinova_gen3_teleop" type="leap_teleop.py" ns="$(arg robot_name)" output="screen" launch-prefix="bash -c 'sleep $(arg start_delay_seconds); $0 $@' "/>
 
 </launch>
