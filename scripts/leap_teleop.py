@@ -156,7 +156,6 @@ class KinovaTeleop(object):
         hand_pose.position.y = hand_pose.position.y * (ARM_WS_MAX[1] - ARM_WS_MIN[1]) + ARM_WS_MIN[1]
         hand_pose.position.z = hand_pose.position.z * (ARM_WS_MAX[2] - ARM_WS_MIN[2]) + ARM_WS_MIN[2]
 
-        rospy.loginfo("Hand pose: x=" + str(hand_pose.position.x) + ", y=" + str(hand_pose.position.y) + ", z=" + str(hand_pose.position.z))
         return hand_pose
     
 
