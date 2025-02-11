@@ -59,7 +59,10 @@ class KinovaTeleop(object):
         self.is_gripper_present = rospy.get_param(rospy.get_namespace() + "is_gripper_present", False)
         if self.is_gripper_present:
             gripper_joint_names = rospy.get_param(rospy.get_namespace() + "gripper_joint_names", [])
-            self.gripper_joint_name = gripper_joint_names[0]
+            gripper_joint_name = gripper_joint_names[0]
+            self.gripper_joint = self.moveit_robot.get_joint(gripper_joint_name)
+            self.gripper_max_absolute_pos = self.gripper_joint.max_bound()
+            self.gripper_min_absolute_pos = self.gripper_joint.min_bound()
         else:
             self.gripper_joint_name = ""
         self.degrees_of_freedom = rospy.get_param(rospy.get_namespace() + "degrees_of_freedom", 7)
@@ -148,27 +151,46 @@ class KinovaTeleop(object):
         return np.sign(vel) * np.log(1 + abs(vel) * VEL_SCALE_FACTOR) / np.log(1 + VEL_SCALE_FACTOR)
     
 
-    def publish_gripper_command(self, position, effort):
-        time_now = rospy.Time.now()
-        gripper_cmd = GripperCommandActionGoal()
-        gripper_cmd.header.stamp = time_now
-        #gripper_cmd.header.frame_id = ''
-        gripper_cmd.goal_id.stamp = time_now
-        #gripper_cmd.goal_id.id = ''
-        gripper_cmd.goal.command.position = position
-        gripper_cmd.goal.command.max_effort = effort
+    def reach_arm_position(self, hand_pose, arm_state):
+        # Calculate the velocity command to move the arm to the hand position
+        arm_vel = TwistCommand()
+        arm_vel.reference_frame = 0
+        # Linear velocity in m/s
+        pos_x_diff = (hand_pose.position.x - arm_state.base.tool_pose_x)
+        pos_y_diff = (hand_pose.position.y - arm_state.base.tool_pose_y)
+        pos_z_diff = (hand_pose.position.z - arm_state.base.tool_pose_z)
+        arm_vel.twist.linear_x = np.clip(self.scale_vel_log(pos_x_diff), -MAX_LINEAR_VEL, MAX_LINEAR_VEL)
+        arm_vel.twist.linear_y = np.clip(self.scale_vel_log(pos_y_diff), -MAX_LINEAR_VEL, MAX_LINEAR_VEL)
+        arm_vel.twist.linear_z = np.clip(self.scale_vel_log(pos_z_diff), -MAX_LINEAR_VEL, MAX_LINEAR_VEL)
+        
+        # Convert orientation from quaternion to euler angles
+        q = [hand_pose.orientation.x, hand_pose.orientation.y, hand_pose.orientation.z, hand_pose.orientation.w]
+        hand_theta_x, hand_theta_y, hand_theta_z = tf.transformations.euler_from_quaternion(q)
 
-        # Publish the gripper command
-        self.pub_gripper.publish(gripper_cmd)
+        # Add correction to the orientation of the hand
+        hand_theta_x = - hand_theta_x 
+        hand_theta_y = hand_theta_y + np.pi/2
+        hand_theta_z = hand_theta_z + np.pi/2
+
+        # Get enf effector orientation in euler
+        arm_state_theta_x = np.radians(arm_state.base.tool_pose_theta_x)
+        arm_state_theta_y = np.radians(arm_state.base.tool_pose_theta_y)
+        arm_state_theta_z = np.radians(arm_state.base.tool_pose_theta_z)
+        
+        theta_x_diff = hand_theta_y - arm_state_theta_x
+        theta_y_diff = hand_theta_z - arm_state_theta_z
+        theta_z_diff = - (hand_theta_x - arm_state_theta_y)
+        arm_vel.twist.angular_x = np.clip(self.scale_vel_log(theta_x_diff), -MAX_ANGULAR_VEL, MAX_ANGULAR_VEL)
+        arm_vel.twist.angular_y = np.clip(self.scale_vel_log(theta_y_diff), -MAX_ANGULAR_VEL, MAX_ANGULAR_VEL)
+        arm_vel.twist.angular_z = self.scale_vel_log(theta_z_diff) # no need to clip since this rotation is alreadu super slow
+
+        # Publish the velocity command
+        self.pub_arm_vel.publish(arm_vel)
 
     
     def reach_gripper_position(self, relative_position):
-        # We only have to move this joint because all others are mimic!
-        gripper_joint = self.moveit_robot.get_joint(self.gripper_joint_name)
-        gripper_max_absolute_pos = gripper_joint.max_bound()
-        gripper_min_absolute_pos = gripper_joint.min_bound()
         try:
-            val = gripper_joint.move(relative_position* (gripper_max_absolute_pos - gripper_min_absolute_pos) + gripper_min_absolute_pos, wait=True)
+            val = self.gripper_joint.move(relative_position* (self.gripper_max_absolute_pos - self.gripper_min_absolute_pos) + self.gripper_min_absolute_pos, wait=True)
             return val
         except:
             return False 
@@ -207,7 +229,6 @@ class KinovaTeleop(object):
 
             # Check that the hand pose is aligned with the current arm state
             diff = self.mismatch_hand_arm(hand_pose, arm_state)
-            # rospy.loginfo("Mismatch between hand and arm: " + str(diff) + " m")
             if diff > 0.3:
                 rospy.loginfo_throttle(1, "Waiting for hand pose to align with arm...")
                 self.rate.sleep()
@@ -217,40 +238,8 @@ class KinovaTeleop(object):
             # All good to send velocity commands
             rospy.loginfo_throttle(60, "Sending velocity commands to the arm...")
 
-            # Calculate the velocity command to move the arm to the hand position
-            arm_vel = TwistCommand()
-            arm_vel.reference_frame = 0
-            # Linear velocity in m/s
-            pos_x_diff = (hand_pose.position.x - arm_state.base.tool_pose_x)
-            pos_y_diff = (hand_pose.position.y - arm_state.base.tool_pose_y)
-            pos_z_diff = (hand_pose.position.z - arm_state.base.tool_pose_z)
-            arm_vel.twist.linear_x = np.clip(self.scale_vel_log(pos_x_diff), -MAX_LINEAR_VEL, MAX_LINEAR_VEL)
-            arm_vel.twist.linear_y = np.clip(self.scale_vel_log(pos_y_diff), -MAX_LINEAR_VEL, MAX_LINEAR_VEL)
-            arm_vel.twist.linear_z = np.clip(self.scale_vel_log(pos_z_diff), -MAX_LINEAR_VEL, MAX_LINEAR_VEL)
-            
-            # Convert orientation from quaternion to euler angles
-            q = [hand_pose.orientation.x, hand_pose.orientation.y, hand_pose.orientation.z, hand_pose.orientation.w]
-            hand_theta_x, hand_theta_y, hand_theta_z = tf.transformations.euler_from_quaternion(q)
-
-            # Add correction to the orientation of the hand
-            hand_theta_x = - hand_theta_x 
-            hand_theta_y = hand_theta_y + np.pi/2
-            hand_theta_z = hand_theta_z + np.pi/2
-
-            # Get enf effector orientation in euler
-            arm_state_theta_x = np.radians(arm_state.base.tool_pose_theta_x)
-            arm_state_theta_y = np.radians(arm_state.base.tool_pose_theta_y)
-            arm_state_theta_z = np.radians(arm_state.base.tool_pose_theta_z)
-            
-            theta_x_diff = hand_theta_y - arm_state_theta_x
-            theta_y_diff = hand_theta_z - arm_state_theta_z
-            theta_z_diff = - (hand_theta_x - arm_state_theta_y)
-            arm_vel.twist.angular_x = np.clip(self.scale_vel_log(theta_x_diff), -MAX_ANGULAR_VEL, MAX_ANGULAR_VEL)
-            arm_vel.twist.angular_y = np.clip(self.scale_vel_log(theta_y_diff), -MAX_ANGULAR_VEL, MAX_ANGULAR_VEL)
-            arm_vel.twist.angular_z = self.scale_vel_log(theta_z_diff) # no need to clip since this rotation is alreadu super slow
-
-            # Publish the velocity command
-            self.pub_arm_vel.publish(arm_vel)
+            # Control the arm
+            self.reach_arm_position(hand_pose, arm_state)
 
             # Control the gripper
             grab_state = 1.0 if grab_state > 0.5 else 0.0
