@@ -8,9 +8,10 @@ import rospy
 import tf2_ros
 import tf
 from geometry_msgs.msg import PoseStamped
-from sensor_msgs.msg import Range
+from sensor_msgs.msg import Range, JointState
 from kortex_driver.msg import *
 from kortex_driver.srv import *
+from control_msgs.msg import GripperCommandActionGoal
 import moveit_commander
 import moveit_msgs.msg
 import numpy as np
@@ -23,7 +24,7 @@ MOVEIT_MAX_ACC = 0.2 # %
 MOVEIT_MAX_VEL = 0.7 # %
 MAX_LINEAR_VEL = 2.0 # m/s
 MAX_ANGULAR_VEL = np.pi # rad/s
-VEL_SCALE_FACTOR = 20.0
+VEL_SCALE_FACTOR = 5.0
 
 '''
 Tool pose at home
@@ -74,7 +75,7 @@ class KinovaTeleop(object):
 
         # Subscribe to the arm and gripper state
         self.sub_arm_state = rospy.Subscriber('/' + self.robot_name + '/base_feedback', BaseCyclic_Feedback, self.arm_state_callback)
-        #self.sub_gripper_state = rospy.Subscriber('/' + self.robot_name + '/gripper_state', Range, self.gripper_state_callback)
+        self.sub_gripper_state = rospy.Subscriber('/' + self.robot_name + '/base_feedback/joint_state', JointState, self.gripper_state_callback)
 
         # Check if the robot is simulated in Gazebo
         self.is_simulation = False #rospy.get_param('~gazebo', False)
@@ -85,11 +86,12 @@ class KinovaTeleop(object):
             self.pub_arm_vel = rospy.Publisher('/' + self.robot_name + '/base/play_cartesian_trajectory', PlayCartesianTrajectoryGoal, queue_size=10)
 
         # Create publisher for gripper commands
-        #self.pub_gripper = rospy.Publisher('/' + self.robot_name + '/robotiq_2f_85_gripper_controller/gripper_cmd/goal ', GripperCommandActionGoal, queue_size=10)
+        self.pub_gripper = rospy.Publisher('/' + self.robot_name + '/robotiq_2f_85_gripper_controller/gripper_cmd/goal', GripperCommandActionGoal, queue_size=10)
 
         # Initialize the hand pose and arm state
         self.last_hand_pose= None
-        self.last_grab_state = None
+        self.last_grab_state = 0.0
+        self.last_gripper_state = None
         self.last_arm_state = None
 
         # Setup the rate for the main loop
@@ -145,6 +147,32 @@ class KinovaTeleop(object):
         '''Logarithmically scale the velocity'''
         return np.sign(vel) * np.log(1 + abs(vel) * VEL_SCALE_FACTOR) / np.log(1 + VEL_SCALE_FACTOR)
     
+
+    def publish_gripper_command(self, position, effort):
+        time_now = rospy.Time.now()
+        gripper_cmd = GripperCommandActionGoal()
+        gripper_cmd.header.stamp = time_now
+        #gripper_cmd.header.frame_id = ''
+        gripper_cmd.goal_id.stamp = time_now
+        #gripper_cmd.goal_id.id = ''
+        gripper_cmd.goal.command.position = position
+        gripper_cmd.goal.command.max_effort = effort
+
+        # Publish the gripper command
+        self.pub_gripper.publish(gripper_cmd)
+
+    
+    def reach_gripper_position(self, relative_position):
+        # We only have to move this joint because all others are mimic!
+        gripper_joint = self.moveit_robot.get_joint(self.gripper_joint_name)
+        gripper_max_absolute_pos = gripper_joint.max_bound()
+        gripper_min_absolute_pos = gripper_joint.min_bound()
+        try:
+            val = gripper_joint.move(relative_position* (gripper_max_absolute_pos - gripper_min_absolute_pos) + gripper_min_absolute_pos, wait=True)
+            return val
+        except:
+            return False 
+        
     
     def run(self):
         '''Main loop to control the arm'''
@@ -170,8 +198,9 @@ class KinovaTeleop(object):
                 self.rate.sleep()
                 continue
 
-            # Get the current arm state
+            # Get the current arm and gripper states
             arm_state = self.last_arm_state
+            gripper_state = self.last_gripper_state
 
             # Transform the hand position and orientation to the base frame
             hand_pose = self.leap_to_arm_workspace(hand_pose)
@@ -187,9 +216,6 @@ class KinovaTeleop(object):
 
             # All good to send velocity commands
             rospy.loginfo_throttle(60, "Sending velocity commands to the arm...")
-    
-            # Get the current gripper state
-            #gripper_state = self.last_gripper_state
 
             # Calculate the velocity command to move the arm to the hand position
             arm_vel = TwistCommand()
@@ -227,16 +253,13 @@ class KinovaTeleop(object):
             self.pub_arm_vel.publish(arm_vel)
 
             # Control the gripper
-            #gripper_cmd = GripperCommandActionGoal()
-            #gripper_cmd.goal.command.position = 0.0
-            #gripper_cmd.goal.command.max_effort = 0.0
-
-            # Publish the gripper command
-            #self.pub_gripper.publish(gripper_cmd)
+            grab_state = 1.0 if grab_state > 0.5 else 0.0
+            gripper_state = 1.0 if gripper_state > 0.5 else 0.0
+            if gripper_state != grab_state:
+                self.reach_gripper_position(grab_state)
 
             # Clear the last hand pose
             self.last_hand_pose = None
-            self.last_grab_state = None
 
             # Sleep for the remainder of the loop
             self.rate.sleep()
@@ -248,13 +271,18 @@ class KinovaTeleop(object):
     
 
     def hand_grab_callback(self, data):
-        # Get the grab strength of the hand
-        self.last_grab_state = data.range
+        # Update the grab state using a windowed average
+        self.last_grab_state = 0.99 * self.last_grab_state + 0.01 * data.range
 
 
     def arm_state_callback(self, data):
         # Get the current arm state
         self.last_arm_state = data
+
+    
+    def gripper_state_callback(self, data):
+        # Get the current gripper state
+        self.last_gripper_state = data.position[self.degrees_of_freedom]
 
 
     def action_topic_callback(self, notif):
@@ -291,7 +319,9 @@ class KinovaTeleop(object):
 
     def go_home(self):
         '''Go to the home position'''
-        return self.reach_named_position("home")
+        home = self.reach_named_position("home")
+        open = self.reach_gripper_position(0.0)
+        return home and open
     
     def stop(self):
         arm_vel = TwistCommand()
