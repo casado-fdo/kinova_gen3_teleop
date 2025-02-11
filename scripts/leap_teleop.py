@@ -27,23 +27,11 @@ LEAP_WS_MIN = [-0.35, -0.45, 0.1] # m in leap motion frame
 LEAP_WS_MAX = [0.35, 0.45, 0.7] # m in leap motion frame
 ARM_WS_MIN = [0.0, -1.3, 0.0] # m in arm base frame
 ARM_WS_MAX = [1.6, 1.3, 1.6] # m in arm base frame
+MISMATCH_THRESHOLD = 0.3 # m in arm base frame
 ARM_ORIGIN_X = 0.57802
 ARM_ORIGIN_Y = 0.00705
 ARM_ORIGIN_Z = 0.42327
-MISMATCH_THRESHOLD = 0.5
 
-
-'''
-Tool pose at home
-tool_pose_x: 0.57802
-tool_pose_y: 0.00705
-tool_pose_z: 0.42327
-
-Hand pose at home
-pose_x: 0.0
-pose_y: 0.0
-pose_z: 0.35 (max is around 0.7)
-'''
 
 class KinovaTeleop(object):
     def __init__(self):
@@ -86,7 +74,7 @@ class KinovaTeleop(object):
         self.leap_hand = rospy.get_param("~leap_hand", "right")
         hand_data = self.leap_ns + '/hands/' + self.leap_hand
         self.sub_hand_pose = rospy.Subscriber(hand_data + '/pose', PoseStamped, self.hand_pose_callback)
-        self.sub_hand_grab = rospy.Subscriber(hand_data + '/grab', Range, self.hand_grab_callback)
+        self.sub_hand_pinch = rospy.Subscriber(hand_data + '/pinch', Range, self.hand_pinch_callback)
         rospy.loginfo("Subscribed to Leap Motion data from " + hand_data) 
 
         # Subscribe to the arm and gripper state
@@ -106,7 +94,7 @@ class KinovaTeleop(object):
 
         # Initialize the hand pose and arm state
         self.last_hand_pose= None
-        self.last_grab_state = 0.0
+        self.last_pinch_state = 0.0
         self.last_gripper_state = None
         self.last_arm_state = None
 
@@ -161,6 +149,8 @@ class KinovaTeleop(object):
 
     def mismatch_hand_arm(self, hand_pose, arm_state):
         '''Check if the hand pose is aligned with the arm state. Returns the euclidean distance between the two'''
+        if hand_pose is None or arm_state is None:
+            return float('inf')
         return np.sqrt((hand_pose.position.x - arm_state.base.tool_pose_x)**2 + (hand_pose.position.y - arm_state.base.tool_pose_y)**2 + (hand_pose.position.z - arm_state.base.tool_pose_z)**2)
     
 
@@ -229,10 +219,10 @@ class KinovaTeleop(object):
         while not rospy.is_shutdown():
             # Get the current hand position and orientation
             hand_pose = self.last_hand_pose
-            grab_state = self.last_grab_state
+            pinch_state = self.last_pinch_state
 
             # Check if the hand pose is received
-            if hand_pose is None or grab_state is None:
+            if hand_pose is None or pinch_state is None:
                 rospy.loginfo_throttle(10, "Waiting for hand pose...")
                 self.stop()
                 self.rate.sleep()
@@ -261,10 +251,10 @@ class KinovaTeleop(object):
 
             # Control the gripper
             if self.control_gripper and self.is_gripper_present:
-                grab_state = 1.0 if grab_state > 0.5 else 0.0
+                pinch_state = 1.0 if pinch_state > 0.5 else 0.0
                 gripper_state = 1.0 if gripper_state > 0.1 else 0.0
-                if gripper_state != grab_state:
-                    self.reach_gripper_position(grab_state)
+                if gripper_state != pinch_state:
+                    self.reach_gripper_position(pinch_state)
 
             # Clear the last hand pose
             self.last_hand_pose = None
@@ -278,9 +268,9 @@ class KinovaTeleop(object):
         self.last_hand_pose = data.pose
     
 
-    def hand_grab_callback(self, data):
-        # Update the grab state using a windowed average
-        self.last_grab_state = 0.99 * self.last_grab_state + 0.01 * data.range
+    def hand_pinch_callback(self, data):
+        # Update the pinch state using a windowed average
+        self.last_pinch_state = 0.99 * self.last_pinch_state + 0.01 * data.range
 
 
     def arm_state_callback(self, data):
