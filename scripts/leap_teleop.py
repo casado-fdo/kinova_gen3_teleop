@@ -24,7 +24,7 @@ MOVEIT_MAX_ACC = 0.2 # %
 MOVEIT_MAX_VEL = 0.7 # %
 MAX_LINEAR_VEL = 2.0 # m/s
 MAX_ANGULAR_VEL = np.pi # rad/s
-VEL_SCALE_FACTOR = 5.0
+VEL_SCALE_FACTOR = 15.0
 
 '''
 Tool pose at home
@@ -254,7 +254,7 @@ class KinovaTeleop(object):
 
             # Control the gripper
             grab_state = 1.0 if grab_state > 0.5 else 0.0
-            gripper_state = 1.0 if gripper_state > 0.5 else 0.0
+            gripper_state = 1.0 if gripper_state > 0.1 else 0.0
             if gripper_state != grab_state:
                 self.reach_gripper_position(grab_state)
 
