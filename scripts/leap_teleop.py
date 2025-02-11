@@ -22,7 +22,15 @@ MOVEIT_MAX_ACC = 0.2 # %
 MOVEIT_MAX_VEL = 0.7 # %
 MAX_LINEAR_VEL = 2.0 # m/s
 MAX_ANGULAR_VEL = np.pi # rad/s
-VEL_SCALE_FACTOR = 10.0
+VEL_SCALE_FACTOR = 5.0
+LEAP_WS_MIN = [-0.35, -0.45, 0.1] # m in leap motion frame
+LEAP_WS_MAX = [0.35, 0.45, 0.7] # m in leap motion frame
+ARM_WS_MIN = [0.0, -1.3, 0.0] # m in arm base frame
+ARM_WS_MAX = [1.6, 1.3, 1.6] # m in arm base frame
+ARM_ORIGIN_X = 0.57802
+ARM_ORIGIN_Y = 0.00705
+ARM_ORIGIN_Z = 0.42327
+MISMATCH_THRESHOLD = 0.5
 
 
 '''
@@ -138,11 +146,17 @@ class KinovaTeleop(object):
     def leap_to_arm_workspace(self, hand_pose):
         '''Transform the hand position to the robot workspace'''
 
-        # Adjust the origin of the hand pose
-        hand_pose.position.x = hand_pose.position.x + 0.57802
-        hand_pose.position.y = hand_pose.position.y + 0.00705
-        hand_pose.position.z = (hand_pose.position.z - 0.35) + 0.42327
+        # Convert Leap Motion position to normalised range [0, 1]
+        hand_pose.position.x = (hand_pose.position.x - LEAP_WS_MIN[0]) / (LEAP_WS_MAX[0] - LEAP_WS_MIN[0])
+        hand_pose.position.y = (hand_pose.position.y - LEAP_WS_MIN[1]) / (LEAP_WS_MAX[1] - LEAP_WS_MIN[1])
+        hand_pose.position.z = (hand_pose.position.z - LEAP_WS_MIN[2]) / (LEAP_WS_MAX[2] - LEAP_WS_MIN[2])
 
+        # Apply linear scaling to the arm workspace
+        hand_pose.position.x = hand_pose.position.x * (ARM_WS_MAX[0] - ARM_WS_MIN[0]) + ARM_WS_MIN[0]
+        hand_pose.position.y = hand_pose.position.y * (ARM_WS_MAX[1] - ARM_WS_MIN[1]) + ARM_WS_MIN[1]
+        hand_pose.position.z = hand_pose.position.z * (ARM_WS_MAX[2] - ARM_WS_MIN[2]) + ARM_WS_MIN[2]
+
+        rospy.loginfo("Hand pose: x=" + str(hand_pose.position.x) + ", y=" + str(hand_pose.position.y) + ", z=" + str(hand_pose.position.z))
         return hand_pose
     
 
@@ -234,7 +248,7 @@ class KinovaTeleop(object):
 
             # Check that the hand pose is aligned with the current arm state
             diff = self.mismatch_hand_arm(hand_pose, arm_state)
-            if diff > 0.3:
+            if diff > MISMATCH_THRESHOLD:
                 rospy.loginfo_throttle(1, "Waiting for hand pose to align with arm...")
                 self.rate.sleep()
                 self.stop()
