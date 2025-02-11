@@ -9,7 +9,6 @@ import tf2_ros
 import tf
 from geometry_msgs.msg import PoseStamped
 from sensor_msgs.msg import Range
-from std_msgs.msg import Empty
 from kortex_driver.msg import *
 from kortex_driver.srv import *
 import moveit_commander
@@ -20,8 +19,11 @@ import sys
 DEFAULT_ROBOT_NAME = "my_gen3"
 DEFAULT_ARM_GROUP_NAME = "arm"
 DEFAULT_HAND =  "/leapmotion/hands/right"
-ROBOT_MAX_ACCELERATION = 0.2
-ROBOT_MAX_VELOCITY = 0.9
+MOVEIT_MAX_ACC = 0.2 # %
+MOVEIT_MAX_VEL = 0.7 # %
+MAX_LINEAR_VEL = 2.0 # m/s
+MAX_ANGULAR_VEL = np.pi # rad/s
+VEL_SCALE_FACTOR = 20.0
 
 '''
 Tool pose at home
@@ -50,8 +52,8 @@ class KinovaTeleop(object):
                                                         moveit_msgs.msg.DisplayTrajectory,
                                                         queue_size=20)
         # Limit velocity and acceleration
-        self.moveit_arm_group.set_max_velocity_scaling_factor(ROBOT_MAX_VELOCITY)
-        self.moveit_arm_group.set_max_acceleration_scaling_factor(ROBOT_MAX_ACCELERATION)
+        self.moveit_arm_group.set_max_velocity_scaling_factor(MOVEIT_MAX_VEL)
+        self.moveit_arm_group.set_max_acceleration_scaling_factor(MOVEIT_MAX_ACC)
 
         self.is_gripper_present = rospy.get_param(rospy.get_namespace() + "is_gripper_present", False)
         if self.is_gripper_present:
@@ -78,9 +80,9 @@ class KinovaTeleop(object):
         self.is_simulation = False #rospy.get_param('~gazebo', False)
         # Create publisher for cartesian velocity commands
         if not self.is_simulation:
-            self.pub_arm_vel = rospy.Publisher('/' + self.robot_name + '/in/cartesian_velocity', TwistCommand, queue_size=1)
+            self.pub_arm_vel = rospy.Publisher('/' + self.robot_name + '/in/cartesian_velocity', TwistCommand, queue_size=10)
         else:
-            self.pub_arm_vel = rospy.Publisher('/' + self.robot_name + '//base/play_cartesian_trajectory', PlayCartesianTrajectoryGoal, queue_size=1)
+            self.pub_arm_vel = rospy.Publisher('/' + self.robot_name + '/base/play_cartesian_trajectory', PlayCartesianTrajectoryGoal, queue_size=10)
 
         # Create publisher for gripper commands
         #self.pub_gripper = rospy.Publisher('/' + self.robot_name + '/robotiq_2f_85_gripper_controller/gripper_cmd/goal ', GripperCommandActionGoal, queue_size=10)
@@ -91,7 +93,7 @@ class KinovaTeleop(object):
         self.last_arm_state = None
 
         # Setup the rate for the main loop
-        self.rate = rospy.Rate(40)
+        self.rate = rospy.Rate(50)
 
         # Handle user keyboard interrupt properly
         rospy.on_shutdown(self.signal_term_handler)
@@ -101,8 +103,8 @@ class KinovaTeleop(object):
         '''Handles KeyboardInterrupts to ensure smooth exit'''
         rospy.loginfo('User Keyboard interrupt. Going home...')
         # Try to go home
-        max_acc = ROBOT_MAX_ACCELERATION
-        max_vel = ROBOT_MAX_VELOCITY
+        max_acc = MOVEIT_MAX_ACC
+        max_vel = MOVEIT_MAX_VEL
         is_home = False
         while not is_home and max_acc >= 0.01:
             rospy.loginfo("Trying to go home (max_acc=" + str(max_acc) + ", max_vel=" + str(max_vel) + ")")
@@ -122,6 +124,7 @@ class KinovaTeleop(object):
         rospy.loginfo('Stopping the arm and shutting down...')
         self.stop()
 
+
     def leap_to_arm_workspace(self, hand_pose):
         '''Transform the hand position and orientation to the robot workspace'''
 
@@ -136,6 +139,11 @@ class KinovaTeleop(object):
     def mismatch_hand_arm(self, hand_pose, arm_state):
         '''Check if the hand pose is aligned with the arm state. Returns the euclidean distance between the two'''
         return np.sqrt((hand_pose.position.x - arm_state.base.tool_pose_x)**2 + (hand_pose.position.y - arm_state.base.tool_pose_y)**2 + (hand_pose.position.z - arm_state.base.tool_pose_z)**2)
+    
+
+    def scale_vel_log(self, vel):
+        '''Logarithmically scale the velocity'''
+        return np.sign(vel) * np.log(1 + abs(vel) * VEL_SCALE_FACTOR) / np.log(1 + VEL_SCALE_FACTOR)
     
     
     def run(self):
@@ -184,13 +192,15 @@ class KinovaTeleop(object):
             #gripper_state = self.last_gripper_state
 
             # Calculate the velocity command to move the arm to the hand position
-            vel_scale_factor = 5.0
             arm_vel = TwistCommand()
             arm_vel.reference_frame = 0
             # Linear velocity in m/s
-            arm_vel.twist.linear_x = (hand_pose.position.x - arm_state.base.tool_pose_x) * vel_scale_factor
-            arm_vel.twist.linear_y = (hand_pose.position.y - arm_state.base.tool_pose_y) * vel_scale_factor
-            arm_vel.twist.linear_z = (hand_pose.position.z - arm_state.base.tool_pose_z) * vel_scale_factor
+            pos_x_diff = (hand_pose.position.x - arm_state.base.tool_pose_x)
+            pos_y_diff = (hand_pose.position.y - arm_state.base.tool_pose_y)
+            pos_z_diff = (hand_pose.position.z - arm_state.base.tool_pose_z)
+            arm_vel.twist.linear_x = np.clip(self.scale_vel_log(pos_x_diff), -MAX_LINEAR_VEL, MAX_LINEAR_VEL)
+            arm_vel.twist.linear_y = np.clip(self.scale_vel_log(pos_y_diff), -MAX_LINEAR_VEL, MAX_LINEAR_VEL)
+            arm_vel.twist.linear_z = np.clip(self.scale_vel_log(pos_z_diff), -MAX_LINEAR_VEL, MAX_LINEAR_VEL)
             
             # Convert orientation from quaternion to euler angles
             q = [hand_pose.orientation.x, hand_pose.orientation.y, hand_pose.orientation.z, hand_pose.orientation.w]
@@ -205,14 +215,13 @@ class KinovaTeleop(object):
             arm_state_theta_x = np.radians(arm_state.base.tool_pose_theta_x)
             arm_state_theta_y = np.radians(arm_state.base.tool_pose_theta_y)
             arm_state_theta_z = np.radians(arm_state.base.tool_pose_theta_z)
-
-            #rospy.loginfo("Hand theta x " + str(hand_theta_x) + " -- arm theta y " + str(arm_state_theta_y))
-            #rospy.loginfo("Hand theta z " + str(hand_theta_z) + " -- arm theta z " + str(arm_state_theta_z))
-            #rospy.loginfo("Hand theta y " + str(hand_theta_y) + " -- arm theta x " + str(arm_state_theta_x))
             
-            arm_vel.twist.angular_x = (hand_theta_y - arm_state_theta_x) * vel_scale_factor
-            arm_vel.twist.angular_y = (hand_theta_z - arm_state_theta_z) * vel_scale_factor
-            arm_vel.twist.angular_z = - (hand_theta_x - arm_state_theta_y) * vel_scale_factor
+            theta_x_diff = hand_theta_y - arm_state_theta_x
+            theta_y_diff = hand_theta_z - arm_state_theta_z
+            theta_z_diff = - (hand_theta_x - arm_state_theta_y)
+            arm_vel.twist.angular_x = np.clip(self.scale_vel_log(theta_x_diff), -MAX_ANGULAR_VEL, MAX_ANGULAR_VEL)
+            arm_vel.twist.angular_y = np.clip(self.scale_vel_log(theta_y_diff), -MAX_ANGULAR_VEL, MAX_ANGULAR_VEL)
+            arm_vel.twist.angular_z = self.scale_vel_log(theta_z_diff) # no need to clip since this rotation is alreadu super slow
 
             # Publish the velocity command
             self.pub_arm_vel.publish(arm_vel)
