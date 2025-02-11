@@ -1,10 +1,21 @@
 <launch>
     
-    <!-- Robot namespace -->
     <arg name="robot_name" default="my_gen3"/>
-    <arg name="start_delay_seconds" default="0"/>
+    <arg name="node_name" default="leap_teleop"/>
+    <arg name="arm_group_name" default="arm"/>
+    <arg name="leap_ns" default="/leapmotion"/>
+    <arg name="leap_hand" default="right"/>
+    <arg name="control_gripper" default="false"/>
 
     <!-- Launch the example in that namespace -->
-    <node name="leap_teleop" pkg="kinova_gen3_teleop" type="leap_teleop.py" ns="$(arg robot_name)" output="screen" launch-prefix="bash -c 'sleep $(arg start_delay_seconds); $0 $@' "/>
+    <node name="$(arg node_name)" pkg="kinova_gen3_teleop" type="leap_teleop.py" ns="$(arg robot_name)" output="screen" >
+        <param name="robot_name" value="$(arg robot_name)"/>
+        <param name="node_name" value="$(arg node_name)"/>
+        <param name="arm_group_name" value="$(arg arm_group_name)"/>
+        <param name="leap_ns" value="$(arg leap_ns)"/>
+        <param name="leap_hand" value="$(arg leap_hand)"/>
+        <param name="control_gripper" value="$(arg control_gripper)"/>
+    </node>
+
 
 </launch>

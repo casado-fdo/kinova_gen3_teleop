@@ -17,14 +17,13 @@ import moveit_msgs.msg
 import numpy as np
 import sys
 
-DEFAULT_ROBOT_NAME = "my_gen3"
-DEFAULT_ARM_GROUP_NAME = "arm"
-DEFAULT_HAND =  "/leapmotion/hands/right"
+
 MOVEIT_MAX_ACC = 0.2 # %
 MOVEIT_MAX_VEL = 0.7 # %
 MAX_LINEAR_VEL = 2.0 # m/s
 MAX_ANGULAR_VEL = np.pi # rad/s
-VEL_SCALE_FACTOR = 15.0
+VEL_SCALE_FACTOR = 10.0
+
 
 '''
 Tool pose at home
@@ -40,11 +39,11 @@ pose_z: 0.35 (max is around 0.7)
 
 class KinovaTeleop(object):
     def __init__(self):
-        self.robot_name = rospy.get_param('~robot_name', DEFAULT_ROBOT_NAME)
+        self.robot_name = rospy.get_param('~robot_name', "my_gen3")
         rospy.init_node('kinova_teleop_' +  self.robot_name, anonymous=True)
 
         # Create the MoveItInterface necessary objects
-        arm_group_name = rospy.get_param(rospy.get_namespace() + "arm_group_name", DEFAULT_ARM_GROUP_NAME)
+        arm_group_name = rospy.get_param("~arm_group_name", "arm")
         moveit_commander.roscpp_initialize(sys.argv)
         self.moveit_robot = moveit_commander.RobotCommander()
         self.moveit_scene = moveit_commander.PlanningSceneInterface()
@@ -56,25 +55,31 @@ class KinovaTeleop(object):
         self.moveit_arm_group.set_max_velocity_scaling_factor(MOVEIT_MAX_VEL)
         self.moveit_arm_group.set_max_acceleration_scaling_factor(MOVEIT_MAX_ACC)
 
+        # Gripper setup
+        self.control_gripper = rospy.get_param("~control_gripper", False)
         self.is_gripper_present = rospy.get_param(rospy.get_namespace() + "is_gripper_present", False)
-        if self.is_gripper_present:
+        if self.control_gripper and self.is_gripper_present:
             gripper_joint_names = rospy.get_param(rospy.get_namespace() + "gripper_joint_names", [])
             gripper_joint_name = gripper_joint_names[0]
             self.gripper_joint = self.moveit_robot.get_joint(gripper_joint_name)
             self.gripper_max_absolute_pos = self.gripper_joint.max_bound()
             self.gripper_min_absolute_pos = self.gripper_joint.min_bound()
+            rospy.loginfo("Gripper control enabled")
         else:
             self.gripper_joint_name = ""
+            rospy.loginfo("Gripper control disabled")
         self.degrees_of_freedom = rospy.get_param(rospy.get_namespace() + "degrees_of_freedom", 7)
 
         rospy.loginfo("Initializing node in namespace " + rospy.get_namespace())
 
 
         # Subscribe to the Leap data
-        hand = rospy.get_param("/hand", DEFAULT_HAND)
-        self.sub_hand_pose = rospy.Subscriber(hand + '/pose', PoseStamped, self.hand_pose_callback)
-        self.sub_hand_grab = rospy.Subscriber(hand + '/grab', Range, self.hand_grab_callback)
-        rospy.loginfo("Subscribed to Leap Motion data from " + hand) 
+        self.leap_ns = rospy.get_param('~leap_ns', "/leapmotion")
+        self.leap_hand = rospy.get_param("~leap_hand", "right")
+        hand_data = self.leap_ns + '/hands/' + self.leap_hand
+        self.sub_hand_pose = rospy.Subscriber(hand_data + '/pose', PoseStamped, self.hand_pose_callback)
+        self.sub_hand_grab = rospy.Subscriber(hand_data + '/grab', Range, self.hand_grab_callback)
+        rospy.loginfo("Subscribed to Leap Motion data from " + hand_data) 
 
         # Subscribe to the arm and gripper state
         self.sub_arm_state = rospy.Subscriber('/' + self.robot_name + '/base_feedback', BaseCyclic_Feedback, self.arm_state_callback)
@@ -131,7 +136,7 @@ class KinovaTeleop(object):
 
 
     def leap_to_arm_workspace(self, hand_pose):
-        '''Transform the hand position and orientation to the robot workspace'''
+        '''Transform the hand position to the robot workspace'''
 
         # Adjust the origin of the hand pose
         hand_pose.position.x = hand_pose.position.x + 0.57802
@@ -242,10 +247,11 @@ class KinovaTeleop(object):
             self.reach_arm_position(hand_pose, arm_state)
 
             # Control the gripper
-            grab_state = 1.0 if grab_state > 0.5 else 0.0
-            gripper_state = 1.0 if gripper_state > 0.1 else 0.0
-            if gripper_state != grab_state:
-                self.reach_gripper_position(grab_state)
+            if self.control_gripper and self.is_gripper_present:
+                grab_state = 1.0 if grab_state > 0.5 else 0.0
+                gripper_state = 1.0 if gripper_state > 0.1 else 0.0
+                if gripper_state != grab_state:
+                    self.reach_gripper_position(grab_state)
 
             # Clear the last hand pose
             self.last_hand_pose = None
@@ -309,7 +315,10 @@ class KinovaTeleop(object):
     def go_home(self):
         '''Go to the home position'''
         home = self.reach_named_position("home")
-        open = self.reach_gripper_position(0.0)
+        if self.control_gripper and self.is_gripper_present:
+            open = self.reach_gripper_position(0.0)
+        else:
+            open = True
         return home and open
     
     def stop(self):
