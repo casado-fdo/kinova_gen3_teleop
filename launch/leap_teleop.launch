@@ -6,6 +6,7 @@
     <arg name="leap_ns" default="/leapmotion"/>
     <arg name="leap_hand" default="right"/>
     <arg name="control_gripper" default="false"/>
+    <arg name="home_pose_name" default="home"/>
 
     <!-- Launch the example in that namespace -->
     <node name="$(arg node_name)" pkg="kinova_gen3_teleop" type="leap_teleop.py" ns="$(arg robot_name)" output="screen" >
@@ -15,6 +16,7 @@
         <param name="leap_ns" value="$(arg leap_ns)"/>
         <param name="leap_hand" value="$(arg leap_hand)"/>
         <param name="control_gripper" value="$(arg control_gripper)"/>
+        <param name="home_pose_name" value="$(arg home_pose_name)"/>
     </node>
 
 

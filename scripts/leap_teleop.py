@@ -51,6 +51,8 @@ class KinovaTeleop(object):
         # Limit velocity and acceleration
         self.moveit_arm_group.set_max_velocity_scaling_factor(MOVEIT_MAX_VEL)
         self.moveit_arm_group.set_max_acceleration_scaling_factor(MOVEIT_MAX_ACC)
+        # Home behaviour
+        self.home_pose = rospy.get_param("~home_pose_name", "home")
 
         # Gripper setup
         self.control_gripper = rospy.get_param("~control_gripper", False)
@@ -322,7 +324,7 @@ class KinovaTeleop(object):
 
     def go_home(self):
         '''Go to the home position'''
-        home = self.reach_named_position("home")
+        home = self.reach_named_position(HOME)
         if self.control_gripper and self.is_gripper_present:
             open = self.reach_gripper_position(0.0)
         else:
