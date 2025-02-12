@@ -324,7 +324,7 @@ class KinovaTeleop(object):
 
     def go_home(self):
         '''Go to the home position'''
-        home = self.reach_named_position(HOME)
+        home = self.reach_named_position(self.home_pose)
         if self.control_gripper and self.is_gripper_present:
             open = self.reach_gripper_position(0.0)
         else:
