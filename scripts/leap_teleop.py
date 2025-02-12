@@ -22,12 +22,13 @@ MOVEIT_MAX_ACC = 0.2 # %
 MOVEIT_MAX_VEL = 0.7 # %
 MAX_LINEAR_VEL = 2.0 # m/s
 MAX_ANGULAR_VEL = np.pi # rad/s
-VEL_SCALE_FACTOR = 5.0
+VEL_SCALE_FACTOR = 10.0
 LEAP_WS_MIN = [-0.35, -0.45, 0.1] # m in leap motion frame
 LEAP_WS_MAX = [0.35, 0.45, 0.7] # m in leap motion frame
 ARM_WS_MIN = [0.0, -1.3, 0.0] # m in arm base frame
 ARM_WS_MAX = [1.6, 1.3, 1.6] # m in arm base frame
-MISMATCH_THRESHOLD = 0.4 # m in arm base frame
+MISMATCH_THRESHOLD = 0.5 # m in arm base frame
+PINCH_THRESHOLD = 0.2 # where 0.5 means 50% of the range
 ARM_ORIGIN_X = 0.57802
 ARM_ORIGIN_Y = 0.00705
 ARM_ORIGIN_Z = 0.42327
@@ -251,9 +252,11 @@ class KinovaTeleop(object):
 
             # Control the gripper
             if self.control_gripper and self.is_gripper_present:
-                pinch_state = 1.0 if pinch_state > 0.5 else 0.0
-                gripper_state = 1.0 if gripper_state > 0.1 else 0.0
-                if gripper_state != pinch_state:
+                if pinch_state <= PINCH_THRESHOLD:
+                    pinch_state = 0.0
+                elif pinch_state >- (1 - PINCH_THRESHOLD):
+                    pinch_state = 1.0
+                if (pinch_state == 0.0 or pinch_state == 1.0) and gripper_state != pinch_state:
                     self.reach_gripper_position(pinch_state)
 
             # Clear the last hand pose
