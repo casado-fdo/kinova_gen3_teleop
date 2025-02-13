@@ -152,10 +152,13 @@ class KinovaTeleop(object):
 
     def mismatch_hand_arm(self, hand_pose, arm_state):
         '''Check if the hand pose is aligned with the arm state. Returns the euclidean distance between the two'''
-        if hand_pose is None or arm_state is None:
+        if hand_pose.position.x == float('inf') or hand_pose.position.y == float('inf') or hand_pose.position.z == float('inf'):
+            rospy.logerr("Hand pose is invalid")
             return float('inf')
-        return np.sqrt((hand_pose.position.x - arm_state.base.tool_pose_x)**2 + (hand_pose.position.y - arm_state.base.tool_pose_y)**2 + (hand_pose.position.z - arm_state.base.tool_pose_z)**2)
-    
+        else:
+            return np.sqrt((hand_pose.position.x - arm_state.base.tool_pose_x)**2 + 
+                           (hand_pose.position.y - arm_state.base.tool_pose_y)**2 + 
+                           (hand_pose.position.z - arm_state.base.tool_pose_z)**2)    
 
     def scale_vel_log(self, vel):
         '''Logarithmically scale the velocity'''
@@ -259,7 +262,6 @@ class KinovaTeleop(object):
                 elif pinch_state >= (1 - PINCH_THRESHOLD):
                     pinch_state = 1.0
                 if (pinch_state == 0.0 or pinch_state == 1.0) and gripper_state != pinch_state:
-                    rospy.loginfo("Gripper is " + str(gripper_state) + "but pinch is " + str(pinch_state))
                     self.reach_gripper_position(pinch_state)
 
             # Clear the last hand pose
