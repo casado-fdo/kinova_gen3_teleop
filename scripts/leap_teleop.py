@@ -204,7 +204,8 @@ class KinovaTeleop(object):
     
     def reach_gripper_position(self, relative_position):
         try:
-            val = self.gripper_joint.move(relative_position* (self.gripper_max_absolute_pos - self.gripper_min_absolute_pos) + self.gripper_min_absolute_pos, wait=True)
+            pos = relative_position* (self.gripper_max_absolute_pos - self.gripper_min_absolute_pos) + self.gripper_min_absolute_pos
+            val = self.gripper_joint.move(pos, wait=True)
             return val
         except:
             return False 
@@ -263,6 +264,7 @@ class KinovaTeleop(object):
                 elif pinch_state >= (1 - PINCH_THRESHOLD):
                     pinch_state = 1.0
                 if (pinch_state == 0.0 or pinch_state == 1.0) and gripper_state != pinch_state:
+                    rospy.loginfo("Changing gripper state to " + str(pinch_state))
                     self.reach_gripper_position(pinch_state)
 
             # Clear the last hand pose
