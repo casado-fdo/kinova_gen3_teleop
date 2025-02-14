@@ -152,13 +152,13 @@ class KinovaTeleop(object):
 
     def mismatch_hand_arm(self, hand_pose, arm_state):
         '''Check if the hand pose is aligned with the arm state. Returns the euclidean distance between the two'''
-        if hand_pose.position.x == float('inf') or hand_pose.position.y == float('inf') or hand_pose.position.z == float('inf'):
-            rospy.logerr("Hand pose is invalid")
-            return float('inf')
-        else:
+        try:
             return np.sqrt((hand_pose.position.x - arm_state.base.tool_pose_x)**2 + 
-                           (hand_pose.position.y - arm_state.base.tool_pose_y)**2 + 
-                           (hand_pose.position.z - arm_state.base.tool_pose_z)**2)    
+                        (hand_pose.position.y - arm_state.base.tool_pose_y)**2 + 
+                        (hand_pose.position.z - arm_state.base.tool_pose_z)**2)    
+        except:
+            rospy.logerr("Error when calculating mismatch between hand and arm")
+            return np.inf
 
     def scale_vel_log(self, vel):
         '''Logarithmically scale the velocity'''
@@ -247,6 +247,7 @@ class KinovaTeleop(object):
                 rospy.loginfo_throttle(1, "Waiting for hand pose to align with arm...")
                 self.rate.sleep()
                 self.stop()
+                self.last_hand_pose = None
                 continue
 
             # All good to send velocity commands
