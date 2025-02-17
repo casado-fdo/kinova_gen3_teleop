@@ -19,12 +19,6 @@ import numpy as np
 import sys
 
 
-MOVEIT_MAX_ACC = 0.2 # %
-MOVEIT_MAX_VEL = 0.7 # %
-VEL_SCALE_FACTOR = 2.0
-MISMATCH_THRESHOLD = 0.5 # m in arm base frame
-PINCH_THRESHOLD = 0.35 # where 0.5 means 50% of the range
-
 class KinovaTeleop(object):
     def __init__(self):
         # Initialize the node
@@ -32,8 +26,22 @@ class KinovaTeleop(object):
         rospy.init_node('kinova_teleop_' +  self.robot_name, anonymous=True)
         rospy.loginfo("Starting Kinova Gen3 teleoperation node for " + self.robot_name)
 
-        # Create the MoveItInterface necessary objects
+        # Get MoveIt! parameters
+        self.home_pose = rospy.get_param("home_pose_name")
+        self.ready_pose = rospy.get_param("ready_pose_name")
+        self.moveit_max_vel = rospy.get_param("moveit_max_vel")
+        self.moveit_max_acc = rospy.get_param("moveit_max_acc")
         arm_group_name = rospy.get_param('arm_group_name')
+
+        # Get teleoperation parameters
+        self.vel_scale_factor = rospy.get_param("vel_scale_factor")
+        self.max_linear_vel = rospy.get_param("max_linear_vel") # m/s
+        self.max_angular_vel = rospy.get_param("max_angular_vel") # rad/s
+        self.mismatch_threshold = rospy.get_param("mismatch_threshold") # m
+        self.pinch_threshold = rospy.get_param("pinch_threshold") # m [0-1]
+        self.control_gripper = rospy.get_param("control_gripper") # true/false
+
+        # Create the MoveItInterface necessary objects
         moveit_commander.roscpp_initialize(sys.argv)
         self.moveit_robot = moveit_commander.RobotCommander()
         self.moveit_scene = moveit_commander.PlanningSceneInterface()
@@ -41,16 +49,8 @@ class KinovaTeleop(object):
         self.moveit_display_trajectory_publisher = rospy.Publisher('/move_group/display_planned_path',
                                                         moveit_msgs.msg.DisplayTrajectory,
                                                         queue_size=20)
-        # Limit velocity and acceleration
-        self.moveit_arm_group.set_max_velocity_scaling_factor(MOVEIT_MAX_VEL)
-        self.moveit_arm_group.set_max_acceleration_scaling_factor(MOVEIT_MAX_ACC)
-
-        self.max_linear_vel = rospy.get_param("max_linear_vel") # m/s
-        self.max_angular_vel = rospy.get_param("max_angular_vel") # rad/s
-
-        # Ready and Home behaviours
-        self.home_pose = rospy.get_param("home_pose_name")
-        self.ready_pose = rospy.get_param("ready_pose_name")
+        self.moveit_arm_group.set_max_velocity_scaling_factor(self.moveit_max_vel)
+        self.moveit_arm_group.set_max_acceleration_scaling_factor(self.moveit_max_acc)
 
         # Robot reference frame
         self.arm_base_link = rospy.get_param("arm_base_link")
@@ -67,7 +67,6 @@ class KinovaTeleop(object):
         self.leap_ws_max = rospy.get_param("leap_workspace_max")
 
         # Gripper setup
-        self.control_gripper = rospy.get_param("control_gripper")
         self.is_gripper_present = rospy.get_param(self.robot_name + "/is_gripper_present", False)
         if self.control_gripper and self.is_gripper_present:
             gripper_joint_names = rospy.get_param(self.robot_name + "/gripper_joint_names", [])
@@ -82,7 +81,6 @@ class KinovaTeleop(object):
         self.degrees_of_freedom = rospy.get_param(rospy.get_namespace() + "degrees_of_freedom", 7)
 
         rospy.loginfo("Initializing node in namespace " + rospy.get_namespace())
-
 
         # Subscribe to the Leap data
         self.leap_ns = rospy.get_param('leap_ns', "/leapmotion")
@@ -124,8 +122,8 @@ class KinovaTeleop(object):
         '''Handles KeyboardInterrupts to ensure smooth exit'''
         rospy.loginfo('User Keyboard interrupt. Going home...')
         # Try to go home
-        max_acc = MOVEIT_MAX_ACC
-        max_vel = MOVEIT_MAX_VEL
+        max_acc = self.moveit_max_acc
+        max_vel = self.moveit_max_vel
         is_home = False
         while not is_home and max_acc >= 0.01:
             rospy.loginfo("Trying to go home (max_acc=" + str(max_acc) + ", max_vel=" + str(max_vel) + ")")
@@ -189,7 +187,7 @@ class KinovaTeleop(object):
 
     def scale_vel_log(self, vel):
         '''Logarithmically scale the velocity'''
-        return np.sign(vel) * np.log(1 + abs(vel) * VEL_SCALE_FACTOR) / np.log(1 + VEL_SCALE_FACTOR)
+        return np.sign(vel) * np.log(1 + abs(vel) * self.vel_scale_factor) / np.log(1 + self.vel_scale_factor)
     
 
     def reach_arm_position(self, hand_pose, tool_pose):
@@ -272,7 +270,7 @@ class KinovaTeleop(object):
 
             # Check that the hand pose is aligned with the current arm state
             diff = self.mismatch_hand_arm(hand_pose, arm_state)
-            if diff > MISMATCH_THRESHOLD:
+            if diff > self.mismatch_threshold:
                 rospy.loginfo_throttle(1, "Waiting for hand pose to align with arm...")
                 self.rate.sleep()
                 self.stop()
@@ -287,9 +285,9 @@ class KinovaTeleop(object):
 
             # Control the gripper
             if self.control_gripper and self.is_gripper_present:
-                if pinch_state <= PINCH_THRESHOLD:
+                if pinch_state <= self.pinch_threshold:
                     pinch_state = 0.0
-                elif pinch_state >= (1 - PINCH_THRESHOLD):
+                elif pinch_state >= (1 - self.pinch_threshold):
                     pinch_state = 1.0
                 if (pinch_state == 0.0 or pinch_state == 1.0) and gripper_state != pinch_state:
                     rospy.loginfo("Changing gripper state to " + str(pinch_state))
