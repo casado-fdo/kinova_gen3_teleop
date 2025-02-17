@@ -36,11 +36,13 @@ ARM_ORIGIN_Z = 0.42327
 
 class KinovaTeleop(object):
     def __init__(self):
-        self.robot_name = rospy.get_param('~robot_name', "my_gen3")
+        # Initialize the node
+        self.robot_name = rospy.get_param('robot_name')
         rospy.init_node('kinova_teleop_' +  self.robot_name, anonymous=True)
+        rospy.loginfo("Starting Kinova Gen3 teleoperation node for " + self.robot_name)
 
         # Create the MoveItInterface necessary objects
-        arm_group_name = rospy.get_param("~arm_group_name", "arm")
+        arm_group_name = rospy.get_param('arm_group_name')
         moveit_commander.roscpp_initialize(sys.argv)
         self.moveit_robot = moveit_commander.RobotCommander()
         self.moveit_scene = moveit_commander.PlanningSceneInterface()
@@ -51,11 +53,15 @@ class KinovaTeleop(object):
         # Limit velocity and acceleration
         self.moveit_arm_group.set_max_velocity_scaling_factor(MOVEIT_MAX_VEL)
         self.moveit_arm_group.set_max_acceleration_scaling_factor(MOVEIT_MAX_ACC)
+
+        self.max_linear_vel = rospy.get_param("max_linear_vel") # m/s
+        self.max_angular_vel = rospy.get_param("max_angular_vel") # rad/s
+
         # Home behaviour
-        self.home_pose = rospy.get_param("~home_pose_name", "home")
+        self.home_pose = rospy.get_param("home_pose_name")
 
         # Gripper setup
-        self.control_gripper = rospy.get_param("~control_gripper", False)
+        self.control_gripper = rospy.get_param("control_gripper")
         self.is_gripper_present = rospy.get_param(rospy.get_namespace() + "is_gripper_present", False)
         if self.control_gripper and self.is_gripper_present:
             gripper_joint_names = rospy.get_param(rospy.get_namespace() + "gripper_joint_names", [])
@@ -83,15 +89,11 @@ class KinovaTeleop(object):
         # Subscribe to the arm and gripper state
         self.sub_arm_state = rospy.Subscriber('/' + self.robot_name + '/base_feedback', BaseCyclic_Feedback, self.arm_state_callback)
         self.sub_gripper_state = rospy.Subscriber('/' + self.robot_name + '/base_feedback/joint_state', JointState, self.gripper_state_callback)
+        rospy.loginfo("Subscribed to arm state from /" + self.robot_name + "/base_feedback")
 
-        # Check if the robot is simulated in Gazebo
-        self.is_simulation = False #rospy.get_param('~gazebo', False)
         # Create publisher for cartesian velocity commands
-        if not self.is_simulation:
-            self.pub_arm_vel = rospy.Publisher('/' + self.robot_name + '/in/cartesian_velocity', TwistCommand, queue_size=10)
-        else:
-            self.pub_arm_vel = rospy.Publisher('/' + self.robot_name + '/base/play_cartesian_trajectory', PlayCartesianTrajectoryGoal, queue_size=10)
-
+        self.pub_arm_vel = rospy.Publisher('/' + self.robot_name + '/in/cartesian_velocity', TwistCommand, queue_size=10)
+        
         # Create publisher for gripper commands
         self.pub_gripper = rospy.Publisher('/' + self.robot_name + '/robotiq_2f_85_gripper_controller/gripper_cmd/goal', GripperCommandActionGoal, queue_size=10)
 
@@ -173,9 +175,9 @@ class KinovaTeleop(object):
         pos_x_diff = (hand_pose.position.x - arm_state.base.tool_pose_x)
         pos_y_diff = (hand_pose.position.y - arm_state.base.tool_pose_y)
         pos_z_diff = (hand_pose.position.z - arm_state.base.tool_pose_z)
-        arm_vel.twist.linear_x = np.clip(self.scale_vel_log(pos_x_diff), -MAX_LINEAR_VEL, MAX_LINEAR_VEL)
-        arm_vel.twist.linear_y = np.clip(self.scale_vel_log(pos_y_diff), -MAX_LINEAR_VEL, MAX_LINEAR_VEL)
-        arm_vel.twist.linear_z = np.clip(self.scale_vel_log(pos_z_diff), -MAX_LINEAR_VEL, MAX_LINEAR_VEL)
+        arm_vel.twist.linear_x = np.clip(self.scale_vel_log(pos_x_diff), -self.max_linear_vel, self.max_linear_vel)
+        arm_vel.twist.linear_y = np.clip(self.scale_vel_log(pos_y_diff), -self.max_linear_vel, self.max_linear_vel)
+        arm_vel.twist.linear_z = np.clip(self.scale_vel_log(pos_z_diff), -self.max_linear_vel, self.max_linear_vel)
         
         # Convert orientation from quaternion to euler angles
         q = [hand_pose.orientation.x, hand_pose.orientation.y, hand_pose.orientation.z, hand_pose.orientation.w]
@@ -194,8 +196,8 @@ class KinovaTeleop(object):
         theta_x_diff = hand_theta_y - arm_state_theta_x
         theta_y_diff = hand_theta_z - arm_state_theta_z
         theta_z_diff = - (hand_theta_x - arm_state_theta_y)
-        arm_vel.twist.angular_x = np.clip(self.scale_vel_log(theta_x_diff), -MAX_ANGULAR_VEL, MAX_ANGULAR_VEL)
-        arm_vel.twist.angular_y = np.clip(self.scale_vel_log(theta_y_diff), -MAX_ANGULAR_VEL, MAX_ANGULAR_VEL)
+        arm_vel.twist.angular_x = np.clip(self.scale_vel_log(theta_x_diff), -self.max_angular_vel, self.max_angular_vel)
+        arm_vel.twist.angular_y = np.clip(self.scale_vel_log(theta_y_diff), -self.max_angular_vel, self.max_angular_vel)
         arm_vel.twist.angular_z = self.scale_vel_log(theta_z_diff) # no need to clip since this rotation is alreadu super slow
 
         # Publish the velocity command
@@ -313,18 +315,15 @@ class KinovaTeleop(object):
 
 
     def reach_named_position(self, target):
-        '''Go to a named target'''
-        # Set the arm group
-        arm_group = self.moveit_arm_group
-        
+        '''Go to a named target'''       
         # Going to one of those targets
         rospy.loginfo("Going to named target " + target)
         # Set the target
-        arm_group.set_named_target(target)
+        self.moveit_arm_group.set_named_target(target)
         # Plan the trajectory
-        success_flag, trajectory_message, planning_time, error_code = arm_group.plan()
+        success_flag, trajectory_message, planning_time, error_code = self.moveit_arm_group.plan()
         # Execute the trajectory and block while it's not finished
-        return arm_group.execute(trajectory_message, wait=True)
+        return self.moveit_arm_group.execute(trajectory_message, wait=True)
 
 
     def go_home(self):

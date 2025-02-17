@@ -1,23 +1,24 @@
 <launch>
-    
-    <arg name="robot_name" default="my_gen3"/>
     <arg name="node_name" default="leap_teleop"/>
+    <arg name="robot_name" default="my_gen3"/>
     <arg name="arm_group_name" default="arm"/>
     <arg name="leap_ns" default="/leapmotion"/>
     <arg name="leap_hand" default="right"/>
     <arg name="control_gripper" default="false"/>
     <arg name="home_pose_name" default="home"/>
+    <arg name="max_linear_vel" default="1.0"/>
+    <arg name="max_angular_vel" default="1.57"/>
 
-    <!-- Launch the example in that namespace -->
-    <node name="$(arg node_name)" pkg="kinova_gen3_teleop" type="leap_teleop.py" ns="$(arg robot_name)" output="screen" >
-        <param name="robot_name" value="$(arg robot_name)"/>
-        <param name="node_name" value="$(arg node_name)"/>
-        <param name="arm_group_name" value="$(arg arm_group_name)"/>
-        <param name="leap_ns" value="$(arg leap_ns)"/>
-        <param name="leap_hand" value="$(arg leap_hand)"/>
-        <param name="control_gripper" value="$(arg control_gripper)"/>
-        <param name="home_pose_name" value="$(arg home_pose_name)"/>
-    </node>
+    <param name="robot_name" value="$(arg robot_name)"/>
+    <param name="arm_group_name" value="$(arg arm_group_name)"/>
+    <param name="leap_ns" value="$(arg leap_ns)"/>
+    <param name="leap_hand" value="$(arg leap_hand)"/>
+    <param name="control_gripper" value="$(arg control_gripper)"/>
+    <param name="home_pose_name" value="$(arg home_pose_name)"/>
+    <param name="max_linear_vel" value="$(arg max_linear_vel)"/>
+    <param name="max_angular_vel" value="$(arg max_angular_vel)"/>
+
+    <node name="$(arg node_name)" pkg="kinova_gen3_teleop" type="leap_teleop.py" output="screen" />
 
 
 </launch>
