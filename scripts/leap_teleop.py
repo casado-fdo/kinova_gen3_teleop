@@ -59,6 +59,7 @@ class KinovaTeleop(object):
 
         # Home behaviour
         self.home_pose = rospy.get_param("home_pose_name")
+        self.ready_pose = rospy.get_param("ready_pose_name")
 
         # Gripper setup
         self.control_gripper = rospy.get_param("control_gripper")
@@ -119,7 +120,7 @@ class KinovaTeleop(object):
         is_home = False
         while not is_home and max_acc >= 0.01:
             rospy.loginfo("Trying to go home (max_acc=" + str(max_acc) + ", max_vel=" + str(max_vel) + ")")
-            is_home = self.go_home()
+            is_home = self.go_to(self.home_pose)
             # Next time try with half the acceleration
             max_acc = max_acc / 2
             max_vel = max_vel / 2
@@ -221,7 +222,7 @@ class KinovaTeleop(object):
             rospy.loginfo_throttle(10, "Waiting for arm state...")
             self.rate.sleep()
         # Go home
-        if not self.go_home():
+        if not self.go_to(self.ready_pose):
             rospy.logerr("Failed to go home")
             return
         rospy.loginfo("Ready to teleoperate the arm!")
@@ -326,14 +327,14 @@ class KinovaTeleop(object):
         return self.moveit_arm_group.execute(trajectory_message, wait=True)
 
 
-    def go_home(self):
+    def go_to(self, pose_name, open_gripper=True):
         '''Go to the home position'''
-        home = self.reach_named_position(self.home_pose)
-        if self.control_gripper and self.is_gripper_present:
+        reach_pose = self.reach_named_position(pose_name)
+        if open_gripper and self.control_gripper and self.is_gripper_present:
             open = self.reach_gripper_position(0.0)
         else:
             open = True
-        return home and open
+        return reach_pose and open
     
     def stop(self):
         arm_vel = TwistCommand()
