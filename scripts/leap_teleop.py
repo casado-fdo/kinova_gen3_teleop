@@ -307,7 +307,7 @@ class KinovaTeleop(object):
 
     def hand_pinch_callback(self, data):
         # Update the pinch state using a windowed average
-        self.last_pinch_state = 0.99 * self.last_pinch_state + 0.01 * data.range
+        self.last_pinch_state = 0.95 * self.last_pinch_state + 0.05 * data.range
 
 
     def arm_state_callback(self, data):
