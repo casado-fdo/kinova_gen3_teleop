@@ -53,11 +53,11 @@ class KinovaTeleop(object):
         self.moveit_arm_group.set_max_velocity_scaling_factor(self.moveit_max_vel)
         self.moveit_arm_group.set_max_acceleration_scaling_factor(self.moveit_max_acc)
 
-        # Robot reference frame TODO
-        #self.arm_base_link = rospy.get_param("arm_base_link")
-        #self.arm_ref_frame = rospy.get_param("arm_reference_frame")
-        #if self.arm_base_link != self.arm_ref_frame:
-        #    rospy.loginfo("Transforming arm state to reference frame " + self.arm_ref_frame)
+        # Robot reference frame
+        self.arm1_base_link = rospy.get_param("arm1_base_link")
+        self.arm2_base_link = rospy.get_param("arm2_base_link")
+        self.reference_frame = rospy.get_param("reference_frame")
+        rospy.loginfo("Transforming arm state to reference frame " + self.reference_frame)
 
         # Robot workspace boundaries
         #self.arm_ws_min = rospy.get_param("arm_workspace_min")
@@ -69,26 +69,27 @@ class KinovaTeleop(object):
 
         # Gripper setup
         #self.is_gripper_present = rospy.get_param(self.robot_name + "/is_gripper_present", False)
-        #if self.control_gripper and self.is_gripper_present:
-        #    gripper_joint_names = rospy.get_param(self.robot_name + "/gripper_joint_names", [])
-        #    gripper_joint_name = gripper_joint_names[0]
-        #    self.gripper_joint = self.moveit_robot.get_joint(gripper_joint_name)
-        #    self.gripper_max_absolute_pos = self.gripper_joint.max_bound()
-        #    self.gripper_min_absolute_pos = self.gripper_joint.min_bound()
-        #    rospy.loginfo("Gripper control enabled")
+        if self.control_gripper: # and self.is_gripper_present:
+            gripper1_joint_names = rospy.get_param(self.robot1_name + "/gripper_joint_names", [])
+            gripper1_joint_name = gripper1_joint_names[0]
+            self.gripper1_joint = self.moveit_robot.get_joint(gripper1_joint_name)
+            gripper2_joint_names = rospy.get_param(self.robot2_name + "/gripper_joint_names", [])
+            gripper2_joint_name = gripper2_joint_names[0]
+            self.gripper2_joint = self.moveit_robot.get_joint(gripper2_joint_name)
+            self.gripper_max_absolute_pos = self.gripper1_joint.max_bound()
+            self.gripper_min_absolute_pos = self.gripper1_joint.min_bound()
+            rospy.loginfo("Gripper control enabled")
         #else:
         #    self.gripper_joint_name = ""
         #    rospy.loginfo("Gripper control disabled")
-        #self.degrees_of_freedom = rospy.get_param(rospy.get_namespace() + "degrees_of_freedom", 7)
+        self.degrees_of_freedom = rospy.get_param(rospy.get_namespace() + "degrees_of_freedom", 7)
 
         rospy.loginfo("Initializing node in namespace " + rospy.get_namespace())
 
         # Subscribe to the Leap data
         self.leap_ns = rospy.get_param('leap_ns', "/leapmotion")
-        self.leap_right_hand = rospy.get_param("leap_hand", "right")
-        self.leap_left_hand = rospy.get_param("leap_hand", "left")
-        right_hand_data = self.leap_ns + '/hands/' + self.leap_right_hand
-        left_hand_data = self.leap_ns + '/hands/' + self.leap_left_hand
+        right_hand_data = self.leap_ns + '/hands/right'
+        left_hand_data = self.leap_ns + '/hands/left'
         self.sub_right_hand_pose = rospy.Subscriber(right_hand_data + '/pose', PoseStamped, self.right_hand_pose_callback)
         self.sub_right_hand_pinch = rospy.Subscriber(right_hand_data + '/pinch', Range, self.right_hand_pinch_callback)
         self.sub_left_hand_pose = rospy.Subscriber(left_hand_data + '/pose', PoseStamped, self.left_hand_pose_callback)
@@ -157,9 +158,10 @@ class KinovaTeleop(object):
         else:
             rospy.loginfo("Went home successfully")
 
-        # Stop the arm
+        # Stop the arms
         rospy.loginfo('Stopping the arm and shutting down...')
-        self.stop()
+        self.stop(self.pub_arm1_vel)
+        self.stop(self.pub_arm2_vel)
 
 
     def leap_to_arm_workspace(self, hand_pose):
@@ -178,17 +180,17 @@ class KinovaTeleop(object):
         return hand_pose
 
     
-    def tool_pose_to_ref_frame(self, pose):
+    def tool_pose_to_ref_frame(self, pose, arm_base_link, ref_frame):
         '''Transform the arm state to the reference frame'''
         # Get the transform from the arm base to the world frame
         try:
-            transform = self.tf_buffer.lookup_transform(self.arm_ref_frame, self.arm_base_link, rospy.Time(0), timeout=rospy.Duration(0.1))
+            transform = self.tf_buffer.lookup_transform(ref_frame, arm_base_link, rospy.Time(0), timeout=rospy.Duration(0.1))
         except (tf2_ros.LookupException, tf2_ros.ConnectivityException, tf2_ros.ExtrapolationException) as e:
             rospy.logerr("Error when transforming arm state to reference frame: " + str(e))
             return None
         # Transform the tool pose to the reference frame
         new_pose = tf2_geometry_msgs.do_transform_pose(pose, transform)
-        new_pose.header.frame_id = self.arm_ref_frame 
+        new_pose.header.frame_id = ref_frame 
         
         return new_pose
     
@@ -266,7 +268,7 @@ class KinovaTeleop(object):
         if not self.go_to(self.ready_pose):
             rospy.logerr("Failed to go home")
             return
-        rospy.loginfo("Ready to teleoperate the arm!")
+        rospy.loginfo("Ready to teleoperate the arms!")
         while not rospy.is_shutdown():
             # Get the current hand positions and orientations
             right_hand_pose = self.last_right_hand_pose
@@ -277,7 +279,8 @@ class KinovaTeleop(object):
             # Check if at least one of the hand poses is received
             if (right_hand_pose is None and left_hand_pose is None) or (right_hand_pose is None and left_hand_pose is None):
                 rospy.loginfo_throttle(10, "Waiting for hand pose...")
-                self.stop()
+                self.stop(self.pub_arm1_vel)
+                self.stop(self.pub_arm2_vel)
                 self.rate.sleep()
                 continue
 
@@ -348,7 +351,7 @@ class KinovaTeleop(object):
 
 
     def arm1_state_callback(self, data):
-        self.last_arm1_state = self.process_arm_state(data, self.arm1_base_link, self.arm1_ref_frame)
+        self.last_arm1_state = self.process_arm_state(data, self.arm1_base_link, self.reference_frame)
 
 
     def gripper1_state_callback(self, data):
@@ -356,7 +359,7 @@ class KinovaTeleop(object):
 
 
     def arm2_state_callback(self, data):
-        self.last_arm2_state = self.process_arm_state(data, self.arm2_base_link, self.arm2_ref_frame)
+        self.last_arm2_state = self.process_arm_state(data, self.arm2_base_link, self.reference_frame)
 
 
     def gripper2_state_callback(self, data):
@@ -378,7 +381,7 @@ class KinovaTeleop(object):
         if base_link == ref_frame:
             return tool_pose
         else:
-            return self.tool_pose_to_ref_frame(tool_pose)
+            return self.tool_pose_to_ref_frame(tool_pose, base_link, ref_frame)
 
     def process_gripper_state(self, data):
         raw_state = data.position[self.degrees_of_freedom]
@@ -417,7 +420,7 @@ class KinovaTeleop(object):
     def go_to(self, pose_name, open_gripper=True):
         '''Go to the home position'''
         reach_pose = self.reach_named_position(pose_name)
-        if open_gripper and self.control_gripper and self.is_gripper_present:
+        if open_gripper and self.control_gripper:
             open1 = self.reach_gripper_position(0.0, self.gripper1_joint)
             open2 = self.reach_gripper_position(0.0, self.gripper2_joint)
             open = open1 and open2

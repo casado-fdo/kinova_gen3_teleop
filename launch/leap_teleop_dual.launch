@@ -1,0 +1,9 @@
+<launch>
+    <arg name="config_file" default="$(find kinova_gen3_teleop)/config/default.yaml"/>
+    <arg name="node_name" default="leap_teleop"/>
+
+    <rosparam file="$(arg config_file)" command="load"/>
+
+    <node name="$(arg node_name)" pkg="kinova_gen3_teleop" type="leap_teleop_dual.py" output="screen" />
+
+</launch>
