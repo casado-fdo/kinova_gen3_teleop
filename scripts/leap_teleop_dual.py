@@ -41,6 +41,8 @@ class KinovaTeleop(object):
         self.mismatch_threshold = rospy.get_param("mismatch_threshold") # m
         self.pinch_threshold = rospy.get_param("pinch_threshold") # m [0-1]
         self.control_gripper = rospy.get_param("control_gripper") # true/false
+        self.inactivity_timeout = rospy.get_param("inactivity_timeout") # s (-1 for infinite)
+        self.last_command_time = None
 
         # Create the MoveItInterface necessary objects
         moveit_commander.roscpp_initialize(sys.argv)
@@ -294,8 +296,14 @@ class KinovaTeleop(object):
             # Check if at least one of the hand poses is received
             if (right_hand_pose is None and left_hand_pose is None) or (right_hand_pose is None and left_hand_pose is None):
                 rospy.loginfo_throttle(10, "Waiting for hand pose...")
-                self.stop(self.pub_arm1_vel)
-                self.stop(self.pub_arm2_vel)
+                if self.last_command_time != None and self.inactivity_timeout > 0 and (rospy.Time.now() - self.last_command_time).to_sec() > self.inactivity_timeout:
+                    rospy.loginfo("No hand pose received in " + str(self.inactivity_timeout) + " seconds. Going to ready pose...")
+                    # Go to "ready" pose
+                    self.go_to(self.ready_pose)
+                    self.last_command_time = None
+                else:
+                    self.stop(self.pub_arm1_vel)
+                    self.stop(self.pub_arm2_vel)
                 self.rate.sleep()
                 continue
 
@@ -341,6 +349,7 @@ class KinovaTeleop(object):
             # Clear the last hand pose
             self.last_right_hand_pose = None
             self.last_left_hand_pose = None
+            self.last_command_time = rospy.Time.now()
 
             # Sleep for the remainder of the loop
             self.rate.sleep()

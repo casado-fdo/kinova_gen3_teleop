@@ -22,3 +22,4 @@ max_angular_vel: 1.57 # rad/s
 mismatch_threshold: 0.5 # m in arm base frame
 pinch_threshold: 0.35 # where 0.5 means 50% of the range
 control_gripper: true
+inactivity_timeout: 5.0 # s (-1 to disable)
