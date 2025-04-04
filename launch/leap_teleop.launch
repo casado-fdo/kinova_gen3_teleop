@@ -1,5 +1,5 @@
 <launch>
-    <arg name="config_file" default="$(find kinova_gen3_teleop)/config/default.yaml"/>
+    <arg name="config_file" default="$(find kinova_gen3_teleop)/cfg/default.yaml"/>
     <arg name="node_name" default="leap_teleop"/>
 
     <rosparam file="$(arg config_file)" command="load"/>

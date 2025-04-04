@@ -10,6 +10,7 @@ import tf
 import tf2_geometry_msgs
 from geometry_msgs.msg import PoseStamped
 from sensor_msgs.msg import Range, JointState
+from leap_motion_controller.msg import Hand
 from kortex_driver.msg import *
 from kortex_driver.srv import *
 from control_msgs.msg import GripperCommandActionGoal
@@ -86,7 +87,7 @@ class KinovaTeleop(object):
         self.leap_ns = rospy.get_param('leap_ns', "/leapmotion")
         self.leap_hand = rospy.get_param("leap_hand", "right")
         hand_data = self.leap_ns + '/hands/' + self.leap_hand
-        self.sub_hand_pose = rospy.Subscriber(hand_data + '/pose', PoseStamped, self.hand_pose_callback)
+        self.sub_hand_pose = rospy.Subscriber(hand_data, Hand, self.hand_pose_callback)
         self.sub_hand_pinch = rospy.Subscriber(hand_data + '/pinch', Range, self.hand_pinch_callback)
         rospy.loginfo("Subscribed to Leap Motion data from " + hand_data) 
 
@@ -302,7 +303,7 @@ class KinovaTeleop(object):
     
     def hand_pose_callback(self, data):
         # Get the position and orientation of the hand
-        self.last_hand_pose = data.pose
+        self.last_hand_pose = data.palm_center
     
 
     def hand_pinch_callback(self, data):
