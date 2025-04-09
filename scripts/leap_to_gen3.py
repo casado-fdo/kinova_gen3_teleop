@@ -39,15 +39,12 @@ class Leap2Gen3(object):
         #if self.arm_base_link != self.arm_ref_frame:
         #    rospy.loginfo("Transforming arm state to reference frame " + self.arm_ref_frame)
 
-        #urdf_str = rospy.get_param("/my_gen3/robot_description")
-        #rospy.set_param("/robot_description", urdf_str)
-
-        self.arm_tip_link = rospy.get_param("tip_link", "tool_frame") #"tool_frame") #"end_effector_link" # "robotiq_arg2f_base_link" # "tool_frame")
+        self.arm_tool_link = rospy.get_param("tool_link", "tool_frame") #"tool_frame") #"end_effector_link" # "robotiq_arg2f_base_link" # "tool_frame")
         self.joint_names = rospy.get_param("joint_names", [f"joint_{i+1}" for i in range(7)])
         self.ik_timeout = rospy.get_param("ik_timeout", 0.1)
         self.ik_eps = rospy.get_param("ik_eps", 1e-2)
 
-        self.ik_solver = IK(self.arm_base_link, self.arm_tip_link, self.ik_timeout, self.ik_eps)
+        self.ik_solver = IK(self.arm_base_link, self.arm_tool_link, self.ik_timeout, self.ik_eps)
    
         #self.sub_arm_joint_state = rospy.Subscriber('/' + self.robot_name + '/base_feedback/joint_state', JointState, self.joint_state_callback)
         self.sub_arm_joint_state = rospy.Subscriber('/joint_states', JointState, self.joint_state_callback)
@@ -127,42 +124,6 @@ class Leap2Gen3(object):
         '''Logarithmically scale the velocity'''
         return np.sign(vel) * np.log(1 + abs(vel) * self.vel_scale_factor) / np.log(1 + self.vel_scale_factor)
     
-
-    def reach_arm_position(self, hand_pose, tool_pose):
-        '''Move the arm to the hand position'''
-        # Calculate the velocity command to move the arm to the hand position
-        arm_vel = TwistCommand()
-        arm_vel.reference_frame = 0
-        # Linear velocity in m/s
-        pos_x_diff = (hand_pose.position.x - tool_pose.pose.position.x)
-        pos_y_diff = (hand_pose.position.y - tool_pose.pose.position.y)
-        pos_z_diff = (hand_pose.position.z - tool_pose.pose.position.z)
-        arm_vel.twist.linear_x = np.clip(self.scale_vel_log(pos_x_diff), -self.max_linear_vel, self.max_linear_vel)
-        arm_vel.twist.linear_y = np.clip(self.scale_vel_log(pos_y_diff), -self.max_linear_vel, self.max_linear_vel)
-        arm_vel.twist.linear_z = np.clip(self.scale_vel_log(pos_z_diff), -self.max_linear_vel, self.max_linear_vel)
-        
-        # Convert orientation from quaternion to euler angles
-        q_hand = [hand_pose.orientation.x, hand_pose.orientation.y, hand_pose.orientation.z, hand_pose.orientation.w]
-        hand_theta_x, hand_theta_y, hand_theta_z = tf.transformations.euler_from_quaternion(q_hand)
-
-        # Add correction to the orientation of the hand
-        hand_theta_x = - hand_theta_x 
-        hand_theta_y = hand_theta_y + np.pi/2
-        hand_theta_z = hand_theta_z + np.pi/2
-
-        # Get enf effector orientation in euler
-        q_tool = [tool_pose.pose.orientation.x, tool_pose.pose.orientation.y, tool_pose.pose.orientation.z, tool_pose.pose.orientation.w]
-        tool_theta_x, tool_theta_y, tool_theta_z = tf.transformations.euler_from_quaternion(q_tool)
-        
-        theta_x_diff = hand_theta_y - tool_theta_x
-        theta_y_diff = hand_theta_z - tool_theta_z
-        theta_z_diff = - (hand_theta_x - tool_theta_y)
-        arm_vel.twist.angular_x = np.clip(self.scale_vel_log(theta_x_diff), -self.max_angular_vel, self.max_angular_vel)
-        arm_vel.twist.angular_y = np.clip(self.scale_vel_log(theta_y_diff), -self.max_angular_vel, self.max_angular_vel)
-        arm_vel.twist.angular_z = self.scale_vel_log(theta_z_diff) # no need to clip since this rotation is alreadu super slow
-
-        # Publish the velocity command
-        #self.pub_arm_vel.publish(arm_vel)
     
     def reach_gripper_position(self, relative_position):
         '''Move the gripper to a relative position between 0 and 1'''

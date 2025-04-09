@@ -2,16 +2,14 @@
     <arg name="config_file" default="$(find kinova_gen3_teleop)/cfg/default.yaml"/>
     <arg name="node_name" default="leap_teleop"/>
 
-    <group ns="my_gen3">
         
-        <rosparam file="$(arg config_file)" command="load"/>
+    <rosparam file="$(arg config_file)" command="load"/>
 
-        <node name="$(arg node_name)_tool_pose_pub" pkg="kinova_gen3_teleop" type="tool_pose_publisher.py" output="screen" />
+    <node name="$(arg node_name)_tool_pose_pub" pkg="kinova_gen3_teleop" type="tool_pose_publisher.py" output="screen" />
 
-        <node name="$(arg node_name)_ik" pkg="kinova_gen3_teleop" type="leap_to_gen3.py" output="screen" />
-    </group>
+    <node name="$(arg node_name)_ik" pkg="kinova_gen3_teleop" type="leap_to_gen3.py" output="screen" />
+
     <node name="$(arg node_name)_control" pkg="kinova_gen3_teleop" type="leap_teleop_joint.py" output="screen" />
-
 
 
 </launch>

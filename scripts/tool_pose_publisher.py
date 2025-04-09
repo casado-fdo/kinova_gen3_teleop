@@ -7,7 +7,6 @@ ROS node that publishes the tool pose of the Gen3 robot arm
 import rospy
 import tf2_ros
 from geometry_msgs.msg import PoseStamped
-import numpy as np
 
 
 class ToolPosePublisher(object):
@@ -23,7 +22,7 @@ class ToolPosePublisher(object):
         #if self.arm_base_link != self.arm_ref_frame:
         #    rospy.loginfo("Transforming arm state to reference frame " + self.arm_ref_frame)
 
-        self.arm_tool_link = rospy.get_param("tip_link", "tool_frame") #"tool_frame") #"end_effector_link" # "robotiq_arg2f_base_link" # "tool_frame")
+        self.arm_tool_link = rospy.get_param("tool_link", "tool_frame")
 
         # Setup the rate for the main loop
         self.rate = rospy.Rate(200) # Hz
