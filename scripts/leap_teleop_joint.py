@@ -18,44 +18,49 @@ import moveit_commander
 import moveit_msgs.msg
 import numpy as np
 import sys
+from controller_manager_msgs.srv import SwitchController
+from kortex_hardware.srv import ModeService
+from sensor_msgs.msg import JointState
+from std_msgs.msg import Float64MultiArray
+from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 
 
 class KinovaTeleop(object):
     def __init__(self):
         # Initialize the node
-        self.robot_name = rospy.get_param('robot_name')
+        self.robot_name = rospy.get_param('/my_gen3/robot_name')
         rospy.init_node('kinova_teleop_' +  self.robot_name, anonymous=True)
         rospy.loginfo("Starting Kinova Gen3 teleoperation node for " + self.robot_name)
 
         # Get MoveIt! parameters
-        self.home_pose = rospy.get_param("home_pose_name")
-        self.ready_pose = rospy.get_param("ready_pose_name")
-        self.moveit_max_vel = rospy.get_param("moveit_max_vel")
-        self.moveit_max_acc = rospy.get_param("moveit_max_acc")
-        arm_group_name = rospy.get_param('arm_group_name')
+        self.home_pose = rospy.get_param("/my_gen3/home_pose_name")
+        self.ready_pose = rospy.get_param("/my_gen3/ready_pose_name")
+        self.moveit_max_vel = rospy.get_param("/my_gen3/moveit_max_vel")
+        self.moveit_max_acc = rospy.get_param("/my_gen3/moveit_max_acc")
+        arm_group_name = rospy.get_param('/my_gen3/arm_group_name')
 
         # Get teleoperation parameters
         #self.vel_scale_factor = rospy.get_param("vel_scale_factor")
         #self.max_linear_vel = rospy.get_param("max_linear_vel") # m/s
         #self.max_angular_vel = rospy.get_param("max_angular_vel") # rad/s
-        self.mismatch_threshold = rospy.get_param("mismatch_threshold") # m
+        self.mismatch_threshold = rospy.get_param("/my_gen3/mismatch_threshold") # m
         #self.pinch_threshold = rospy.get_param("pinch_threshold") # m [0-1]
-        self.control_gripper = rospy.get_param("control_gripper") # true/false
+        self.control_gripper = rospy.get_param("/my_gen3/control_gripper") # true/false
 
         # Create the MoveItInterface necessary objects
-        moveit_commander.roscpp_initialize(sys.argv)
-        self.moveit_robot = moveit_commander.RobotCommander()
-        self.moveit_scene = moveit_commander.PlanningSceneInterface()
-        self.moveit_arm_group = moveit_commander.MoveGroupCommander(arm_group_name)
-        self.moveit_display_trajectory_publisher = rospy.Publisher('/move_group/display_planned_path',
-                                                        moveit_msgs.msg.DisplayTrajectory,
-                                                        queue_size=20)
-        self.moveit_arm_group.set_max_velocity_scaling_factor(self.moveit_max_vel)
-        self.moveit_arm_group.set_max_acceleration_scaling_factor(self.moveit_max_acc)
+        #moveit_commander.roscpp_initialize(sys.argv)
+        #self.moveit_robot = moveit_commander.RobotCommander()
+        #self.moveit_scene = moveit_commander.PlanningSceneInterface()
+        #self.moveit_arm_group = moveit_commander.MoveGroupCommander(arm_group_name)
+        #self.moveit_display_trajectory_publisher = rospy.Publisher('/move_group/display_planned_path',
+        #                                                moveit_msgs.msg.DisplayTrajectory,
+        #                                                queue_size=20)
+        #self.moveit_arm_group.set_max_velocity_scaling_factor(self.moveit_max_vel)
+        #self.moveit_arm_group.set_max_acceleration_scaling_factor(self.moveit_max_acc)
 
         # Robot reference frame
-        self.arm_base_link = rospy.get_param("arm_base_link")
-        self.arm_ref_frame = rospy.get_param("arm_reference_frame")
+        self.arm_base_link = rospy.get_param("/my_gen3/arm_base_link")
+        self.arm_ref_frame = rospy.get_param("/my_gen3/arm_reference_frame")
         if self.arm_base_link != self.arm_ref_frame:
             rospy.loginfo("Transforming arm state to reference frame " + self.arm_ref_frame)
 
@@ -87,7 +92,8 @@ class KinovaTeleop(object):
 
         # Create publisher for cartesian velocity commands
         #self.pub_arm_vel = rospy.Publisher('/' + self.robot_name + '/in/cartesian_velocity', TwistCommand, queue_size=10)
-        
+        self.pub_arm_joint_vel = rospy.Publisher("/joint_space_compliant_controller/command", JointTrajectoryPoint, queue_size=1)
+
         # Create publisher for gripper commands
         #self.pub_gripper = rospy.Publisher('/' + self.robot_name + '/robotiq_2f_85_gripper_controller/gripper_cmd/goal', GripperCommandActionGoal, queue_size=10)
 
@@ -100,14 +106,14 @@ class KinovaTeleop(object):
         self.last_desired_pose = None
         self.last_desired_joint_state = None
         #self.last_pinch_state = 0.0
-        #self.last_gripper_state = None
+        self.last_gripper_state = None
         self.last_arm_state = None
 
         # Setup the rate for the main loop
-        self.rate = rospy.Rate(500) # 500 Hz
+        self.rate = rospy.Rate(100) # 500 Hz
 
         # Handle user keyboard interrupt properly
-        rospy.on_shutdown(self.signal_term_handler)
+        #rospy.on_shutdown(self.signal_term_handler)
 
         # Initialize TF listener
         self.tf_buffer = tf2_ros.Buffer()
@@ -209,14 +215,39 @@ class KinovaTeleop(object):
         '''Main loop to control the arm'''
 
         # Wait for the arm state to be received
-        while self.last_arm_state is None:
-            rospy.loginfo_throttle(10, "Waiting for arm state...")
-            self.rate.sleep()
+        #while self.last_arm_state is None:
+        #    rospy.loginfo_throttle(10, "Waiting for arm state...")
+        #    self.rate.sleep()
         # Go home
-        if not self.go_to(self.ready_pose):
-            rospy.logerr("Failed to go home")
-            return
+        #if not self.go_to(self.ready_pose):
+        #    rospy.logerr("Failed to go home")
+        #    return
         rospy.loginfo("Ready to teleoperate the arm!")
+
+        print("Switching to joint space controller. The robot might jerk a bit as it is switching to effort mode.")
+        rospy.wait_for_service("controller_manager/switch_controller")
+        rospy.wait_for_service("set_control_mode")
+        switch_controller = rospy.ServiceProxy("controller_manager/switch_controller", SwitchController)
+        mode_change = rospy.ServiceProxy("set_control_mode", ModeService)
+        try:
+            resp = switch_controller(
+                ["joint_space_compliant_controller"],
+                ["velocity_controller", "task_space_compliant_controller"],
+                1,
+                0,
+                5,
+            )
+        except rospy.ServiceException as e:
+            print("Service call failed: %s" % e)
+
+        try:
+            resp1 = mode_change("effort")
+            print("Mode change response: ", resp1)
+        except rospy.ServiceException as e:
+            print("Service call failed: %s" % e)
+
+        print("Switch complete. You can now send commands to the robot.")
+
         while not rospy.is_shutdown():
             # Get the desired hand pose and pinch state
             desired_pose = self.last_desired_pose
@@ -234,26 +265,33 @@ class KinovaTeleop(object):
             gripper_state = self.last_gripper_state
 
             # Check that the hand pose is aligned with the current arm state
-            diff = self.mismatch_hand_arm(desired_pose, arm_state)
-            if diff > self.mismatch_threshold:
-                rospy.loginfo_throttle(1, "Waiting for hand pose to align with arm...")
-                self.rate.sleep()
-                self.stop()
-                self.last_desired_pose = None
-                continue
+            #diff = self.mismatch_hand_arm(desired_pose, arm_state)
+            #if diff > self.mismatch_threshold:
+            #    rospy.loginfo_throttle(1, "Waiting for hand pose to align with arm...")
+            #    self.rate.sleep()
+            #    self.stop()
+            #    self.last_desired_pose = None
+            #    continue
 
             # All good to send velocity commands
             rospy.loginfo_throttle(5, "Sending velocity commands to the arm...")
 
             # Control the arm
             #self.reach_arm_position(hand_pose, arm_state)
-            speed_req = kortex_driver.srv.SendJointSpeedsCommandRequest()
-            for jidx,jname in enumerate(self.joint_names):
-                joint_speed = JointSpeed()
-                joint_speed.joint_identifier = jidx
-                joint_speed.value = desired_joint_state.velocity[jidx]
-                speed_req.input.joint_speeds.append(joint_speed)
-            self.srv_joint_speeds(speed_req)
+            #speed_req = kortex_driver.srv.SendJointSpeedsCommandRequest()
+            #for jidx,jname in enumerate(self.joint_names):
+            #    joint_speed = JointSpeed()
+            #    joint_speed.joint_identifier = jidx
+            #    joint_speed.value = desired_joint_state.velocity[jidx]
+            #    speed_req.input.joint_speeds.append(joint_speed)
+            #self.srv_joint_speeds(speed_req)
+            cmd = JointTrajectoryPoint()
+            cmd.positions = desired_joint_state.position
+            cmd.velocities = [0.0] * len(self.joint_names)
+            cmd.effort = [0.0] * len(self.joint_names)
+            #cmd.velocities[0] = desired_joint_state.position[0] * 0.5
+            #rospy.loginfo("Sending joint velocity command: " + str(cmd.positions))
+            self.pub_arm_joint_vel.publish(cmd)
 
             # Control the gripper
             if self.control_gripper and self.is_gripper_present:
@@ -352,14 +390,19 @@ class KinovaTeleop(object):
         return reach_pose and open
     
     def stop(self):
-        speed_req = kortex_driver.srv.SendJointSpeedsCommandRequest()
-        for jidx,jname in enumerate(self.joint_names):
-            joint_speed = JointSpeed()
-            joint_speed.joint_identifier = jidx
-            joint_speed.value = 0.0
-            speed_req.input.joint_speeds.append(joint_speed)
-        self.srv_joint_speeds(speed_req)
-        return True
+        #speed_req = kortex_driver.srv.SendJointSpeedsCommandRequest()
+        #for jidx,jname in enumerate(self.joint_names):
+        #    joint_speed = JointSpeed()
+        #    joint_speed.joint_identifier = jidx
+        #    joint_speed.value = 0.0
+        #    speed_req.input.joint_speeds.append(joint_speed)
+        #self.srv_joint_speeds(speed_req)
+        #return True
+        cmd = JointTrajectoryPoint()
+        #cmd.positions = [0.0] * len(self.joint_names)
+        cmd.velocities = [0.0] * len(self.joint_names)
+        self.pub_arm_joint_vel.publish(cmd)
+
 
 
 if __name__ == '__main__':

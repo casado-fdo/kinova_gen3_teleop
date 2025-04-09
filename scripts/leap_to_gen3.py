@@ -16,6 +16,8 @@ import numpy as np
 from trac_ik_python.trac_ik import IK
 
 
+MAX_JOINT_DIFF = 0.2
+
 class Leap2Gen3(object):
     def __init__(self):
         # Initialize the node
@@ -37,18 +39,18 @@ class Leap2Gen3(object):
         #if self.arm_base_link != self.arm_ref_frame:
         #    rospy.loginfo("Transforming arm state to reference frame " + self.arm_ref_frame)
 
-        urdf_str = rospy.get_param("/my_gen3/robot_description")
-        rospy.set_param("/robot_description", urdf_str)
+        #urdf_str = rospy.get_param("/my_gen3/robot_description")
+        #rospy.set_param("/robot_description", urdf_str)
 
-        self.arm_tip_link = rospy.get_param("tip_link", "tool_frame") #"end_effector_link" # "robotiq_arg2f_base_link" # "tool_frame")
+        self.arm_tip_link = rospy.get_param("tip_link", "tool_frame") #"tool_frame") #"end_effector_link" # "robotiq_arg2f_base_link" # "tool_frame")
         self.joint_names = rospy.get_param("joint_names", [f"joint_{i+1}" for i in range(7)])
-        self.ik_timeout = rospy.get_param("ik_timeout", 0.05)
-        self.ik_eps = rospy.get_param("ik_eps", 1e-4)
+        self.ik_timeout = rospy.get_param("ik_timeout", 0.1)
+        self.ik_eps = rospy.get_param("ik_eps", 1e-2)
 
         self.ik_solver = IK(self.arm_base_link, self.arm_tip_link, self.ik_timeout, self.ik_eps)
-        self.srv_joint_speeds= rospy.ServiceProxy('/my_gen3/base/send_joint_speeds_command', SendJointSpeedsCommand)
    
-        self.sub_arm_joint_state = rospy.Subscriber('/' + self.robot_name + '/base_feedback/joint_state', JointState, self.joint_state_callback)
+        #self.sub_arm_joint_state = rospy.Subscriber('/' + self.robot_name + '/base_feedback/joint_state', JointState, self.joint_state_callback)
+        self.sub_arm_joint_state = rospy.Subscriber('/joint_states', JointState, self.joint_state_callback)
         self.last_joint_state = None
         self.q_hand_to_tool_frame = [0.5] * 4
         self.last_ik_speed = [0.0] * len(self.joint_names)
@@ -78,7 +80,7 @@ class Leap2Gen3(object):
         self.last_arm_state = None
 
         # Setup the rate for the main loop
-        self.rate = rospy.Rate(200)
+        self.rate = rospy.Rate(5)
 
         # Initialize TF listener
         self.tf_buffer = tf2_ros.Buffer()
@@ -201,6 +203,11 @@ class Leap2Gen3(object):
                 self.rate.sleep()
                 continue
 
+            if self.last_joint_state is None:
+                rospy.loginfo_throttle(10, "Waiting for arm state...")
+                self.rate.sleep()
+                continue
+
             # Transform the hand position and orientation to the base frame
             hand_pose = self.leap_to_arm_workspace(hand_pose)
 
@@ -231,26 +238,23 @@ class Leap2Gen3(object):
             ik_solution = self.ik_solver.get_ik(seed, x, y, z, qx, qy, qz, qw)
 
             if ik_solution is not None:
-                # First transform the solution fron radians to degrees
-                ik_solution = np.rad2deg(ik_solution)
 
                 # Check the difference between the desired and current joint angles
-                ik_speed = []
+                new_position = []
                 for jidx,jname in enumerate(self.joint_names):
                     # Get the difference between the desired and current joint angles
-                    diff = ik_solution[jidx] - self.last_joint_state[jidx] * 180/np.pi
-                    # Scale each desired joint speed to the maximum speed
-                    ik_speed.append(diff * 1.0)
-                    # Average the last speed with the current speed
-                    ik_speed[jidx] = 0.5 * self.last_ik_speed[jidx] + 0.5 * ik_speed[jidx]
+                    diff = ik_solution[jidx] - self.last_joint_state[jidx]
+
+                    diff = np.clip(diff, -MAX_JOINT_DIFF, MAX_JOINT_DIFF)
+                    
+                    # The new position is the current position plus the difference
+                    new_position.append(self.last_joint_state[jidx] + diff)
 
                 # Publish the joint speeds
                 joint_state = JointState()
                 joint_state.header.stamp = time
                 joint_state.name = self.joint_names
-                joint_state.position = ik_solution
-                joint_state.velocity = ik_speed
-                #joint_state.effort = [0.0] * len(self.joint_names)
+                joint_state.position = new_position 
                 self.pub_ik_joint_state_goal.publish(joint_state)
             
             else:
@@ -259,6 +263,7 @@ class Leap2Gen3(object):
 
             # Clear the last hand pose
             self.last_hand_pose = None
+            self.last_joint_state = None
 
             # Sleep for the remainder of the loop
             self.rate.sleep()
@@ -275,7 +280,7 @@ class Leap2Gen3(object):
        
 
     def joint_state_callback(self, data):
-        self.last_joint_state = data.position
+        self.last_joint_state = np.array(data.position)[1:] # skip the first joint (finger joint)
 
     
     def gripper_state_callback(self, data):
