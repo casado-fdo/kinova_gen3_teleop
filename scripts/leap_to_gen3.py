@@ -73,7 +73,6 @@ class Leap2Gen3(object):
         # Initialize the hand pose and arm state
         self.last_hand_pose= None
         self.last_pinch_state = 0.0
-        self.last_gripper_state = None
         self.last_arm_state = None
 
         # Setup the rate for the main loop
@@ -123,16 +122,6 @@ class Leap2Gen3(object):
     def scale_vel_log(self, vel):
         '''Logarithmically scale the velocity'''
         return np.sign(vel) * np.log(1 + abs(vel) * self.vel_scale_factor) / np.log(1 + self.vel_scale_factor)
-    
-    
-    def reach_gripper_position(self, relative_position):
-        '''Move the gripper to a relative position between 0 and 1'''
-        try:
-            pos = relative_position* (self.gripper_max_absolute_pos - self.gripper_min_absolute_pos) + self.gripper_min_absolute_pos
-            val = self.gripper_joint.move(pos, wait=True)
-            return val
-        except:
-            return False 
 
     
     def quat_multiply(self, q1, q2):
@@ -222,7 +211,6 @@ class Leap2Gen3(object):
             else:
                 rospy.logerr("IK solution not found")
 
-
             # Clear the last hand pose
             self.last_hand_pose = None
             self.last_joint_state = None
@@ -242,13 +230,7 @@ class Leap2Gen3(object):
        
 
     def joint_state_callback(self, data):
-        self.last_joint_state = np.array(data.position)[1:] # skip the first joint (finger joint)        
-
-    
-    def gripper_state_callback(self, data):
-        # Get the current gripper state
-        raw_state = data.position[self.degrees_of_freedom]
-        self.last_gripper_state = 0.0 if raw_state < 0.1 else 1.0
+        self.last_joint_state = np.array(data.position)[1:] # skip the first joint (finger joint)       
 
 
 if __name__ == '__main__':

@@ -46,13 +46,8 @@ class KinovaTeleop(object):
         self.joint_names = rospy.get_param("joint_names", [f"joint_{i+1}" for i in range(7)])
    
         # Gripper setup
-        self.is_gripper_present = rospy.get_param(self.robot_name + "/is_gripper_present", False)
-        if self.control_gripper and self.is_gripper_present:
-            gripper_joint_names = rospy.get_param(self.robot_name + "/gripper_joint_names", [])
-            gripper_joint_name = gripper_joint_names[0]
+        if self.control_gripper:
             self.gripper_joint = None # TODO
-            self.gripper_max_absolute_pos = self.gripper_joint.max_bound()
-            self.gripper_min_absolute_pos = self.gripper_joint.min_bound()
             rospy.loginfo("Gripper control enabled")
         else:
             self.gripper_joint_name = ""
@@ -140,18 +135,9 @@ class KinovaTeleop(object):
             return np.inf
 
     
-    def reach_gripper_position(self, relative_position):
-        '''Move the gripper to a relative position between 0 and 1'''
-        try:
-            pos = relative_position* (self.gripper_max_absolute_pos - self.gripper_min_absolute_pos) + self.gripper_min_absolute_pos
-            val = self.gripper_joint.move(pos, wait=True)
-            return val
-        except:
-            return False 
-
-    
     def desired_pose_callback(self, data):
         self.last_desired_pose = data.pose
+
 
     def desired_joint_state_callback(self, data):
         self.last_desired_joint_state = data
@@ -231,14 +217,14 @@ class KinovaTeleop(object):
             self.pub_arm_joint_vel.publish(cmd)
 
             # Control the gripper
-            if self.control_gripper and self.is_gripper_present:
-                if pinch_state <= self.pinch_threshold:
-                    pinch_state = 0.0
-                elif pinch_state >= (1 - self.pinch_threshold):
-                    pinch_state = 1.0
-                if (pinch_state == 0.0 or pinch_state == 1.0) and gripper_state != pinch_state:
-                    rospy.loginfo("Changing gripper state to " + str(pinch_state))
-                    self.reach_gripper_position(pinch_state)
+            #if self.control_gripper:
+            #    if pinch_state <= self.pinch_threshold:
+            #        pinch_state = 0.0
+            #    elif pinch_state >= (1 - self.pinch_threshold):
+            #        pinch_state = 1.0
+            #    if (pinch_state == 0.0 or pinch_state == 1.0) and gripper_state != pinch_state:
+            #        rospy.loginfo("Changing gripper state to " + str(pinch_state))
+            #        # TODO: set gripper state
 
             # Clear the last goal
             self.last_desired_pose = None
