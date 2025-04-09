@@ -80,13 +80,14 @@ class Leap2Gen3(object):
         self.last_arm_state = None
 
         # Setup the rate for the main loop
-        self.rate = rospy.Rate(5)
+        self.rate = rospy.Rate(100)
 
         # Initialize TF listener
         self.tf_buffer = tf2_ros.Buffer()
         self.tf_listener = tf2_ros.TransformListener(self.tf_buffer)
 
         # Initialize our publishers
+        self.pub_current_tool_pose = rospy.Publisher('/tool_pose', PoseStamped, queue_size=1)
         self.pub_tool_pose_goal = rospy.Publisher('/leap_to_gen3/tool_pose_goal', PoseStamped, queue_size=1)
         self.pub_ik_joint_state_goal = rospy.Publisher('/leap_to_gen3/ik_joint_state_goal', JointState, queue_size=1)
 
@@ -192,7 +193,7 @@ class Leap2Gen3(object):
             rospy.loginfo_throttle(10, "Waiting for arm state...")
             self.rate.sleep()
         
-        rospy.loginfo("Ready!")
+        rospy.loginfo("Ready to perform IK!")
         while not rospy.is_shutdown():
             # Get the current hand position and orientation
             hand_pose = self.last_hand_pose
@@ -280,7 +281,7 @@ class Leap2Gen3(object):
        
 
     def joint_state_callback(self, data):
-        self.last_joint_state = np.array(data.position)[1:] # skip the first joint (finger joint)
+        self.last_joint_state = np.array(data.position)[1:] # skip the first joint (finger joint)        
 
     
     def gripper_state_callback(self, data):
