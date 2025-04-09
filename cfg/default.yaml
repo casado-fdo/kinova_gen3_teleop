@@ -10,10 +10,8 @@ leap_workspace_min: [-0.35, -0.45, 0.1] # m in leap motion frame
 leap_workspace_max: [0.35, 0.45, 0.7] # m in leap motion frame
 
 # MoveIt!
-moveit_max_acc: 0.2 # %
-moveit_max_vel: 0.3 # %
-home_pose_name: "retract"
-ready_pose_name: "home"
+home_pose_name: "home"
+ready_pose_name: "ready"
 
 # Teleoperation
 vel_scale_factor: 2.0 # %
