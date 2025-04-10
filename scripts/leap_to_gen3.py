@@ -16,7 +16,7 @@ import numpy as np
 from trac_ik_python.trac_ik import IK
 
 
-MAX_JOINT_DIFF = 0.2
+MAX_JOINT_DIFF = 0.3
 
 class Leap2Gen3(object):
     def __init__(self):
@@ -41,10 +41,10 @@ class Leap2Gen3(object):
 
         self.arm_tool_link = rospy.get_param("tool_link", "tool_frame") #"tool_frame") #"end_effector_link" # "robotiq_arg2f_base_link" # "tool_frame")
         self.joint_names = rospy.get_param("joint_names", [f"joint_{i+1}" for i in range(7)])
-        self.ik_timeout = rospy.get_param("ik_timeout", 0.1)
-        self.ik_eps = rospy.get_param("ik_eps", 1e-2)
+        self.ik_timeout = rospy.get_param("ik_timeout", 0.01) # seconds
+        self.ik_eps = rospy.get_param("ik_eps", 1e-4) # tolerance for the IK solver
 
-        self.ik_solver = IK(self.arm_base_link, self.arm_tool_link, self.ik_timeout, self.ik_eps)
+        self.ik_solver = IK(self.arm_base_link, self.arm_tool_link, self.ik_timeout, self.ik_eps, solve_type="Distance")
    
         #self.sub_arm_joint_state = rospy.Subscriber('/' + self.robot_name + '/base_feedback/joint_state', JointState, self.joint_state_callback)
         self.sub_arm_joint_state = rospy.Subscriber('/joint_states', JointState, self.joint_state_callback)
@@ -189,15 +189,13 @@ class Leap2Gen3(object):
             ik_solution = self.ik_solver.get_ik(seed, x, y, z, qx, qy, qz, qw)
 
             if ik_solution is not None:
-
                 # Check the difference between the desired and current joint angles
                 new_position = []
                 for jidx,jname in enumerate(self.joint_names):
                     # Get the difference between the desired and current joint angles
                     diff = ik_solution[jidx] - self.last_joint_state[jidx]
-
-                    diff = np.clip(diff, -MAX_JOINT_DIFF, MAX_JOINT_DIFF)
-                    
+                    # Limit the difference to a maximum value
+                    diff = np.clip(diff, -MAX_JOINT_DIFF, MAX_JOINT_DIFF)          
                     # The new position is the current position plus the difference
                     new_position.append(self.last_joint_state[jidx] + diff)
 
