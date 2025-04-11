@@ -16,7 +16,7 @@ import numpy as np
 from trac_ik_python.trac_ik import IK
 
 
-MAX_JOINT_DIFF = 0.3
+MAX_JOINT_DIFF = 0.3 # in radians, maximum joint position difference between two consecutive commands
 
 class Leap2Gen3(object):
     def __init__(self):
@@ -118,11 +118,6 @@ class Leap2Gen3(object):
         
         return new_pose
 
-
-    def scale_vel_log(self, vel):
-        '''Logarithmically scale the velocity'''
-        return np.sign(vel) * np.log(1 + abs(vel) * self.vel_scale_factor) / np.log(1 + self.vel_scale_factor)
-
     
     def quat_multiply(self, q1, q2):
         # Multiply two quaternions (Hamilton product)
@@ -199,7 +194,7 @@ class Leap2Gen3(object):
                     # The new position is the current position plus the difference
                     new_position.append(self.last_joint_state[jidx] + diff)
 
-                # Publish the joint speeds
+                # Publish the joint state goal
                 joint_state = JointState()
                 joint_state.header.stamp = time
                 joint_state.name = self.joint_names
