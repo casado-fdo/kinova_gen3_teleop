@@ -16,7 +16,7 @@ import numpy as np
 from trac_ik_python.trac_ik import IK
 
 # Maximum joint position difference between two consecutive commands
-MAX_JOINT_DIFF = [0.15, 0.15, 0.15, 0.15, 0.3, 0.5, 0.7] # radians 
+MAX_JOINT_DIFF = [0.15, 0.15, 0.15, 0.2, 0.3, 0.5, 0.7] # radians 
 
 class Leap2Gen3(object):
     def __init__(self):
@@ -41,7 +41,7 @@ class Leap2Gen3(object):
 
         self.arm_tool_link = rospy.get_param("tool_link", "tool_frame") #"tool_frame") #"end_effector_link" # "robotiq_arg2f_base_link" # "tool_frame")
         self.joint_names = rospy.get_param("joint_names", [f"joint_{i+1}" for i in range(7)])
-        self.ik_timeout = rospy.get_param("ik_timeout", 0.0025) # seconds
+        self.ik_timeout = rospy.get_param("ik_timeout", 0.005) # seconds
         self.ik_eps = rospy.get_param("ik_eps", 1e-4) # tolerance for the IK solver
 
         self.ik_solver = IK(self.arm_base_link, self.arm_tool_link, self.ik_timeout, self.ik_eps, solve_type="Distance")

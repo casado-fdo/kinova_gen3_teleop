@@ -17,6 +17,10 @@ from kortex_hardware.srv import ModeService
 from sensor_msgs.msg import JointState
 from trajectory_msgs.msg import JointTrajectoryPoint
 
+# Maximum joint position difference between two consecutive commands
+MAX_JOINT_DIFF = [0.15, 0.15, 0.15, 0.2, 0.25, 0.25, 0.25] # radians 
+#MIN_JOINT_DIFF = [0.05, 0.05, 0.05, 0.07, 0.1, 0.1, 0.1] # radians
+GOTO_TIMEOUT = 8.0 # seconds
 
 class KinovaTeleop(object):
     def __init__(self):
@@ -26,8 +30,8 @@ class KinovaTeleop(object):
         rospy.loginfo("Starting Kinova Gen3 teleoperation node for " + self.robot_name)
 
         # Get home / ready configurations
-        self.home_pose = rospy.get_param("home_pose_name")
-        self.ready_pose = rospy.get_param("ready_pose_name")
+        self.home = rospy.get_param("home_joint_state")
+        self.ready = rospy.get_param("ready_joint_state")
 
         # Get teleoperation parameters
         #self.vel_scale_factor = rospy.get_param("vel_scale_factor")
@@ -79,7 +83,7 @@ class KinovaTeleop(object):
         #self.last_pinch_state = 0.0
         
         # Setup the rate for the main loop
-        self.rate = rospy.Rate(100) # Hz
+        self.rate = rospy.Rate(75) # Hz
 
         # Handle user keyboard interrupt properly
         rospy.on_shutdown(self.signal_term_handler)
@@ -93,10 +97,8 @@ class KinovaTeleop(object):
         '''Handles KeyboardInterrupts to ensure smooth exit'''
         rospy.loginfo('User Keyboard interrupt. Going home...')
         # Try to go home
-        is_home = False
-        #while not is_home:
-        #    TODO: home behaviour
-
+        rospy.loginfo('Going home...')
+        is_home = self.go_to(self.home)
 
         if not is_home:
             rospy.logerr("Failed to go home")
@@ -142,6 +144,32 @@ class KinovaTeleop(object):
     def desired_joint_state_callback(self, data):
         self.last_desired_joint_state = data
 
+
+    def switch_to_joint_effort_mode(self):
+        rospy.loginfo("Switching to joint space controller. The robot might jerk a bit as it is switching to effort mode...")
+        rospy.wait_for_service("controller_manager/switch_controller")
+        rospy.wait_for_service("set_control_mode")
+        switch_controller = rospy.ServiceProxy("controller_manager/switch_controller", SwitchController)
+        mode_change = rospy.ServiceProxy("set_control_mode", ModeService)
+        try:
+            switch_controller(
+                ["joint_space_compliant_controller"],
+                ["velocity_controller", "task_space_compliant_controller"],
+                1,
+                0,
+                5,
+            )
+        except rospy.ServiceException as e:
+            rospy.loginfo("Service call failed: %s" % e)
+
+        try:
+            resp = mode_change("effort")
+            rospy.loginfo("Mode change response: " + str(resp))
+        except rospy.ServiceException as e:
+            rospy.loginfo("Service call failed: %s" % e)
+
+        rospy.loginfo("Switch complete!")
+
     
     def run(self):
         '''Main loop to control the arm'''
@@ -151,35 +179,16 @@ class KinovaTeleop(object):
             rospy.loginfo_throttle(10, "Waiting for robot state...")
             self.rate.sleep()
 
-        # Go home
-        #if not self.go_to(self.ready_pose):
+        # Switch to joint space controller
+        self.switch_to_joint_effort_mode()
+
+        # Go to ready position
+        rospy.loginfo('Going to ready position...')
+        self.go_to(self.ready)
         #    rospy.logerr("Failed to go home")
         #    return
         rospy.loginfo("Ready to teleoperate the arm!")
 
-        print("Switching to joint space controller. The robot might jerk a bit as it is switching to effort mode.")
-        rospy.wait_for_service("controller_manager/switch_controller")
-        rospy.wait_for_service("set_control_mode")
-        switch_controller = rospy.ServiceProxy("controller_manager/switch_controller", SwitchController)
-        mode_change = rospy.ServiceProxy("set_control_mode", ModeService)
-        try:
-            resp = switch_controller(
-                ["joint_space_compliant_controller"],
-                ["velocity_controller", "task_space_compliant_controller"],
-                1,
-                0,
-                5,
-            )
-        except rospy.ServiceException as e:
-            print("Service call failed: %s" % e)
-
-        try:
-            resp1 = mode_change("effort")
-            print("Mode change response: ", resp1)
-        except rospy.ServiceException as e:
-            print("Service call failed: %s" % e)
-
-        print("Switch complete. You can now send commands to the robot.")
 
         while not rospy.is_shutdown():
             # Get the goal pose and pinch state
@@ -252,6 +261,52 @@ class KinovaTeleop(object):
         # Get the current gripper state
         raw_state = data.position[self.degrees_of_freedom]
         self.last_gripper_state = 0.0 if raw_state < 0.1 else 1.0
+
+
+    def go_to(self, target_joint_state):
+        '''Go to the target joint state in multiple steps'''
+        # Check if the target joint state is valid
+        if len(target_joint_state) != len(self.joint_names):
+            rospy.logerr("Invalid joint state length")
+            return False
+
+        rospy.loginfo("Trying to go to target joint state: " + str(target_joint_state))
+        time = rospy.get_time()
+        while not rospy.is_shutdown():
+            # Check if the time limit is reached
+            if rospy.get_time() - time > GOTO_TIMEOUT:
+                rospy.logerr("Timed out while trying to go to target joint state")
+                return False
+            new_joint_pos = []
+            diffs = []
+            for i in range(len(self.joint_names)):
+                # Check the difference between the current and target joint state
+                diff = np.arctan2(
+                    np.sin(target_joint_state[i] - self.last_joint_state[i]),
+                    np.cos(target_joint_state[i] - self.last_joint_state[i]),
+                )
+                diffs.append(diff)
+                # Limit the difference to a maximum value
+                diff = np.clip(diff, -MAX_JOINT_DIFF[i], MAX_JOINT_DIFF[i])
+                # If the difference is too small, set it to the minimum value
+                #if np.abs(diff) < MIN_JOINT_DIFF[i]:
+                #    diff = np.sign(diff) * MIN_JOINT_DIFF[i]   
+                # The new position is the current position plus the difference
+                new_joint_pos.append(self.last_joint_state[i] + diff)
+            
+            # Check if the new joint position is similar enough to the target joint state using diffs vector
+            if np.all(np.abs(diffs) < 0.15):
+                rospy.loginfo("Reached target joint state")
+                return True
+          
+            # Publish the new joint position
+            cmd = JointTrajectoryPoint()
+            cmd.positions = new_joint_pos
+            cmd.velocities = [0.0] * len(self.joint_names)
+            cmd.effort = [0.0] * len(self.joint_names)
+            self.pub_arm_joint_vel.publish(cmd)
+            # Sleep for a short time to allow the arm to move
+            self.rate.sleep()
 
     
     def stop(self):
