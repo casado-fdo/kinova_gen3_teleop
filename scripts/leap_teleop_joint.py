@@ -79,7 +79,7 @@ class KinovaTeleop(object):
         #self.last_pinch_state = 0.0
         
         # Setup the rate for the main loop
-        self.rate = rospy.Rate(15) # Hz
+        self.rate = rospy.Rate(100) # Hz
 
         # Handle user keyboard interrupt properly
         rospy.on_shutdown(self.signal_term_handler)

@@ -15,8 +15,8 @@ from kortex_driver.srv import *
 import numpy as np
 from trac_ik_python.trac_ik import IK
 
-
-MAX_JOINT_DIFF = 0.3 # in radians, maximum joint position difference between two consecutive commands
+# Maximum joint position difference between two consecutive commands
+MAX_JOINT_DIFF = [0.15, 0.15, 0.15, 0.15, 0.3, 0.5, 0.7] # radians 
 
 class Leap2Gen3(object):
     def __init__(self):
@@ -41,7 +41,7 @@ class Leap2Gen3(object):
 
         self.arm_tool_link = rospy.get_param("tool_link", "tool_frame") #"tool_frame") #"end_effector_link" # "robotiq_arg2f_base_link" # "tool_frame")
         self.joint_names = rospy.get_param("joint_names", [f"joint_{i+1}" for i in range(7)])
-        self.ik_timeout = rospy.get_param("ik_timeout", 0.01) # seconds
+        self.ik_timeout = rospy.get_param("ik_timeout", 0.0025) # seconds
         self.ik_eps = rospy.get_param("ik_eps", 1e-4) # tolerance for the IK solver
 
         self.ik_solver = IK(self.arm_base_link, self.arm_tool_link, self.ik_timeout, self.ik_eps, solve_type="Distance")
@@ -83,7 +83,6 @@ class Leap2Gen3(object):
         self.tf_listener = tf2_ros.TransformListener(self.tf_buffer)
 
         # Initialize our publishers
-        self.pub_current_tool_pose = rospy.Publisher('/tool_pose', PoseStamped, queue_size=1)
         self.pub_tool_pose_goal = rospy.Publisher('/leap_to_gen3/tool_pose_goal', PoseStamped, queue_size=1)
         self.pub_ik_joint_state_goal = rospy.Publisher('/leap_to_gen3/ik_joint_state_goal', JointState, queue_size=1)
 
@@ -187,10 +186,11 @@ class Leap2Gen3(object):
                 # Check the difference between the desired and current joint angles
                 new_position = []
                 for jidx,jname in enumerate(self.joint_names):
-                    # Get the difference between the desired and current joint angles
-                    diff = ik_solution[jidx] - self.last_joint_state[jidx]
+                    # Angle difference for joints in radians
+                    diff = np.arctan2(np.sin(ik_solution[jidx] - self.last_joint_state[jidx]),
+                                    np.cos(ik_solution[jidx] - self.last_joint_state[jidx]))
                     # Limit the difference to a maximum value
-                    diff = np.clip(diff, -MAX_JOINT_DIFF, MAX_JOINT_DIFF)          
+                    diff = np.clip(diff, -MAX_JOINT_DIFF[jidx], MAX_JOINT_DIFF[jidx])    
                     # The new position is the current position plus the difference
                     new_position.append(self.last_joint_state[jidx] + diff)
 
