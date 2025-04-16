@@ -7,6 +7,7 @@ ROS node to get the inverse kinematics for the hand pose provided by the Leap Mo
 import rospy
 import tf2_ros
 import tf2_geometry_msgs
+from std_msgs.msg import Float32
 from geometry_msgs.msg import PoseStamped
 from sensor_msgs.msg import Range, JointState
 from leap_motion_controller.msg import Hand
@@ -85,6 +86,7 @@ class Leap2Gen3(object):
         # Initialize our publishers
         self.pub_tool_pose_goal = rospy.Publisher('/leap_to_gen3/tool_pose_goal', PoseStamped, queue_size=1)
         self.pub_ik_joint_state_goal = rospy.Publisher('/leap_to_gen3/ik_joint_state_goal', JointState, queue_size=1)
+        self.pub_gripper_state_goal = rospy.Publisher('/leap_to_gen3/gripper_pose_goal', Float32, queue_size=1)
 
 
     def leap_to_arm_workspace(self, hand_pose):
@@ -166,7 +168,12 @@ class Leap2Gen3(object):
             qx, qy, qz, qw = q_result[0], q_result[1], q_result[2], q_result[3]
 
             time = rospy.Time.now()
-            
+
+            # Discretize the pinch state in 5 different states [0.0, 0.25, 0.5, 0.75, 1.0]
+            gripper_state = int(self.last_pinch_state * 5) / 4.0
+            # Publish the gripper pose goal
+            self.pub_gripper_state_goal.publish(gripper_state)
+                          
             # Publish the tool pose goal
             tool_pose_goal = PoseStamped()
             tool_pose_goal.header.stamp = time

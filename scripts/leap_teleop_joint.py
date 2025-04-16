@@ -9,18 +9,18 @@ import tf2_ros
 import tf2_geometry_msgs
 from geometry_msgs.msg import PoseStamped
 from sensor_msgs.msg import JointState
+from trajectory_msgs.msg import JointTrajectoryPoint
+from std_msgs.msg import Float32
 from kortex_driver.msg import *
 from kortex_driver.srv import *
 import numpy as np
 from controller_manager_msgs.srv import SwitchController
 from kortex_hardware.srv import ModeService
-from sensor_msgs.msg import JointState
-from trajectory_msgs.msg import JointTrajectoryPoint
 
 # Maximum joint position difference between two consecutive commands
 MAX_JOINT_DIFF = [0.15, 0.15, 0.15, 0.2, 0.25, 0.25, 0.25] # radians 
-#MIN_JOINT_DIFF = [0.05, 0.05, 0.05, 0.07, 0.1, 0.1, 0.1] # radians
 GOTO_TIMEOUT = 8.0 # seconds
+ARM_DOFS = 7
 
 class KinovaTeleop(object):
     def __init__(self):
@@ -30,8 +30,10 @@ class KinovaTeleop(object):
         rospy.loginfo("Starting Kinova Gen3 teleoperation node for " + self.robot_name)
 
         # Get home / ready configurations
-        self.home = rospy.get_param("home_joint_state")
-        self.ready = rospy.get_param("ready_joint_state")
+        self.arm_home = rospy.get_param("home_arm_joint_state")
+        self.arm_ready = rospy.get_param("ready_arm_joint_state")
+
+        
 
         # Get teleoperation parameters
         #self.vel_scale_factor = rospy.get_param("vel_scale_factor")
@@ -39,7 +41,6 @@ class KinovaTeleop(object):
         #self.max_angular_vel = rospy.get_param("max_angular_vel") # rad/s
         self.mismatch_threshold = rospy.get_param("mismatch_threshold") # m
         #self.pinch_threshold = rospy.get_param("pinch_threshold") # m [0-1]
-        self.control_gripper = rospy.get_param("control_gripper") # true/false
 
         # Robot reference frame
         self.arm_base_link = rospy.get_param("arm_base_link")
@@ -47,16 +48,20 @@ class KinovaTeleop(object):
         if self.arm_base_link != self.arm_ref_frame:
             rospy.loginfo("Transforming arm state to reference frame " + self.arm_ref_frame)
 
-        self.joint_names = rospy.get_param("joint_names", [f"joint_{i+1}" for i in range(7)])
+        self.arm_dofs = ARM_DOFS
+        self.joint_names = rospy.get_param("joint_names", [f"joint_{i+1}" for i in range(self.arm_dofs)])
    
         # Gripper setup
+        self.control_gripper = rospy.get_param("control_gripper") # true/false
         if self.control_gripper:
-            self.gripper_joint = None # TODO
             rospy.loginfo("Gripper control enabled")
+            self.gripper_home = rospy.get_param("home_gripper_position")
+            self.gripper_ready = rospy.get_param("ready_gripper_position")
+            self.joint_names.append("finger_joint")
         else:
-            self.gripper_joint_name = ""
             rospy.loginfo("Gripper control disabled")
-        self.degrees_of_freedom = rospy.get_param(rospy.get_namespace() + "degrees_of_freedom", 7)
+            self.gripper_home = None
+            self.gripper_ready = None   
 
         rospy.loginfo("Initializing node in namespace " + rospy.get_namespace())
 
@@ -76,6 +81,8 @@ class KinovaTeleop(object):
         self.sub_desired_pose_goal = rospy.Subscriber('/leap_to_gen3/tool_pose_goal', PoseStamped, self.desired_pose_callback)
         # Subscribe to the desired joint state topic
         self.sub_joint_state_goal = rospy.Subscriber('/leap_to_gen3/ik_joint_state_goal', JointState, self.desired_joint_state_callback)
+        # Subscribe to the desired gripper state topic
+        self.sub_gripper_pose_goal = rospy.Subscriber('/leap_to_gen3/gripper_pose_goal', Float32, self.current_gripper_state_callback)
 
         # Initialize the desired pose and joint state
         self.last_desired_pose = None
@@ -98,7 +105,7 @@ class KinovaTeleop(object):
         rospy.loginfo('User Keyboard interrupt. Going home...')
         # Try to go home
         rospy.loginfo('Going home...')
-        is_home = self.go_to(self.home)
+        is_home = self.go_to(self.arm_home, self.gripper_home)
 
         if not is_home:
             rospy.logerr("Failed to go home")
@@ -142,7 +149,7 @@ class KinovaTeleop(object):
 
 
     def desired_joint_state_callback(self, data):
-        self.last_desired_joint_state = data
+        self.last_desired_joint_state = data.position
 
 
     def switch_to_joint_effort_mode(self):
@@ -184,7 +191,7 @@ class KinovaTeleop(object):
 
         # Go to ready position
         rospy.loginfo('Going to ready position...')
-        self.go_to(self.ready)
+        self.go_to(self.arm_ready, self.gripper_ready)
         #    rospy.logerr("Failed to go home")
         #    return
         rospy.loginfo("Ready to teleoperate the arm!")
@@ -218,22 +225,15 @@ class KinovaTeleop(object):
             # All good to send velocity commands
             rospy.loginfo_throttle(5, "Sending velocity commands to the arm...")
 
+            if self.control_gripper:
+                desired_joint_state = desired_joint_state + (gripper_state,)
+
             # Control the arm
             cmd = JointTrajectoryPoint()
-            cmd.positions = desired_joint_state.position
-            cmd.velocities = [0.0] * len(self.joint_names)
-            cmd.effort = [0.0] * len(self.joint_names)
+            cmd.positions = desired_joint_state
+            cmd.velocities = [0.0] * len(cmd.positions)
+            cmd.effort = [0.0] * len(cmd.positions)
             self.pub_arm_joint_vel.publish(cmd)
-
-            # Control the gripper
-            #if self.control_gripper:
-            #    if pinch_state <= self.pinch_threshold:
-            #        pinch_state = 0.0
-            #    elif pinch_state >= (1 - self.pinch_threshold):
-            #        pinch_state = 1.0
-            #    if (pinch_state == 0.0 or pinch_state == 1.0) and gripper_state != pinch_state:
-            #        rospy.loginfo("Changing gripper state to " + str(pinch_state))
-            #        # TODO: set gripper state
 
             # Clear the last goal
             self.last_desired_pose = None
@@ -253,20 +253,22 @@ class KinovaTeleop(object):
 
 
     def current_joint_state_callback(self, data):
-        # Get the current joint state
-        self.last_joint_state = np.array(data.position)[1:] # skip the first joint (finger joint)        
+        # Get only the arm joints
+        self.last_joint_state = np.array(data.position)[1:] # skip the first joint (finger joint)
+        if self.control_gripper:
+            # Move the gripper joint to the end of the list
+            self.last_joint_state = np.append(self.last_joint_state, data.position[0])       
 
     
     def current_gripper_state_callback(self, data):
         # Get the current gripper state
-        raw_state = data.position[self.degrees_of_freedom]
-        self.last_gripper_state = 0.0 if raw_state < 0.1 else 1.0
+        self.last_gripper_state = data.data
 
 
-    def go_to(self, target_joint_state):
+    def go_to(self, target_joint_state, target_gripper_pos=None):
         '''Go to the target joint state in multiple steps'''
         # Check if the target joint state is valid
-        if len(target_joint_state) != len(self.joint_names):
+        if len(target_joint_state) != self.arm_dofs:
             rospy.logerr("Invalid joint state length")
             return False
 
@@ -279,7 +281,7 @@ class KinovaTeleop(object):
                 return False
             new_joint_pos = []
             diffs = []
-            for i in range(len(self.joint_names)):
+            for i in range(self.arm_dofs):
                 # Check the difference between the current and target joint state
                 diff = np.arctan2(
                     np.sin(target_joint_state[i] - self.last_joint_state[i]),
@@ -288,11 +290,13 @@ class KinovaTeleop(object):
                 diffs.append(diff)
                 # Limit the difference to a maximum value
                 diff = np.clip(diff, -MAX_JOINT_DIFF[i], MAX_JOINT_DIFF[i])
-                # If the difference is too small, set it to the minimum value
-                #if np.abs(diff) < MIN_JOINT_DIFF[i]:
-                #    diff = np.sign(diff) * MIN_JOINT_DIFF[i]   
                 # The new position is the current position plus the difference
                 new_joint_pos.append(self.last_joint_state[i] + diff)
+
+            # Check if the gripper position is valid [0.0, 1.0]
+            if self.control_gripper and target_gripper_pos is not None and target_gripper_pos >= 0.0 and target_gripper_pos <= 1.0:
+                # Add the gripper joint to the new joint position
+                new_joint_pos.append(target_gripper_pos)
             
             # Check if the new joint position is similar enough to the target joint state using diffs vector
             if np.all(np.abs(diffs) < 0.15):
@@ -302,8 +306,8 @@ class KinovaTeleop(object):
             # Publish the new joint position
             cmd = JointTrajectoryPoint()
             cmd.positions = new_joint_pos
-            cmd.velocities = [0.0] * len(self.joint_names)
-            cmd.effort = [0.0] * len(self.joint_names)
+            cmd.velocities = [0.0] * len(new_joint_pos)
+            cmd.effort = [0.0] * len(new_joint_pos)
             self.pub_arm_joint_vel.publish(cmd)
             # Sleep for a short time to allow the arm to move
             self.rate.sleep()
