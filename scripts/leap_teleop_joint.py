@@ -33,8 +33,6 @@ class KinovaTeleop(object):
         self.arm_home = rospy.get_param("home_arm_joint_state")
         self.arm_ready = rospy.get_param("ready_arm_joint_state")
 
-        
-
         # Get teleoperation parameters
         #self.vel_scale_factor = rospy.get_param("vel_scale_factor")
         #self.max_linear_vel = rospy.get_param("max_linear_vel") # m/s
@@ -191,9 +189,10 @@ class KinovaTeleop(object):
 
         # Go to ready position
         rospy.loginfo('Going to ready position...')
-        self.go_to(self.arm_ready, self.gripper_ready)
-        #    rospy.logerr("Failed to go home")
-        #    return
+        if not self.go_to(self.arm_ready, self.gripper_ready):
+            rospy.logerr("Failed to go home")
+            return
+    
         rospy.loginfo("Ready to teleoperate the arm!")
 
 
@@ -273,6 +272,8 @@ class KinovaTeleop(object):
             return False
 
         rospy.loginfo("Trying to go to target joint state: " + str(target_joint_state))
+        if target_gripper_pos is not None:
+            rospy.loginfo("\t...with gripper target position: " + str(target_gripper_pos))
         time = rospy.get_time()
         while not rospy.is_shutdown():
             # Check if the time limit is reached

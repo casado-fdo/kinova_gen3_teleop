@@ -30,7 +30,6 @@ class Leap2Gen3(object):
         self.vel_scale_factor = rospy.get_param("vel_scale_factor")
         self.max_linear_vel = rospy.get_param("max_linear_vel") # m/s
         self.max_angular_vel = rospy.get_param("max_angular_vel") # rad/s
-        self.mismatch_threshold = rospy.get_param("mismatch_threshold") # m
 
         # Robot reference frame
         self.arm_base_link = rospy.get_param("arm_base_link")
@@ -42,7 +41,7 @@ class Leap2Gen3(object):
 
         self.arm_tool_link = rospy.get_param("tool_link", "tool_frame") #"tool_frame") #"end_effector_link" # "robotiq_arg2f_base_link" # "tool_frame")
         self.joint_names = rospy.get_param("joint_names", [f"joint_{i+1}" for i in range(7)])
-        self.ik_timeout = rospy.get_param("ik_timeout", 0.005) # seconds
+        self.ik_timeout = rospy.get_param("ik_timeout", 0.1) # seconds
         self.ik_eps = rospy.get_param("ik_eps", 1e-4) # tolerance for the IK solver
 
         self.ik_solver = IK(self.arm_base_link, self.arm_tool_link, self.ik_timeout, self.ik_eps, solve_type="Distance")
@@ -169,8 +168,8 @@ class Leap2Gen3(object):
 
             time = rospy.Time.now()
 
-            # Discretize the pinch state in 5 different states [0.0, 0.25, 0.5, 0.75, 1.0]
-            gripper_state = int(self.last_pinch_state * 5) / 4.0
+            # Discretize the pinch state in 10 different states [0.0, 0.1, 0.2, ..., 1.0]
+            gripper_state = int(self.last_pinch_state * 10) / 9.0
             # Publish the gripper pose goal
             self.pub_gripper_state_goal.publish(gripper_state)
                           
@@ -192,14 +191,21 @@ class Leap2Gen3(object):
             if ik_solution is not None:
                 # Check the difference between the desired and current joint angles
                 new_position = []
+                invalid_joint = False
                 for jidx,jname in enumerate(self.joint_names):
                     # Angle difference for joints in radians
                     diff = np.arctan2(np.sin(ik_solution[jidx] - self.last_joint_state[jidx]),
                                     np.cos(ik_solution[jidx] - self.last_joint_state[jidx]))
-                    # Limit the difference to a maximum value
-                    diff = np.clip(diff, -MAX_JOINT_DIFF[jidx], MAX_JOINT_DIFF[jidx])    
+                    # If the difference is greater than a certain threshold, break
+                    if abs(diff) > MAX_JOINT_DIFF[jidx]:
+                        invalid_joint = True
+                        break
                     # The new position is the current position plus the difference
                     new_position.append(self.last_joint_state[jidx] + diff)
+                
+                if invalid_joint:
+                    rospy.logwarn("Joint angle difference is too large for joint " + jname)
+                    continue
 
                 # Publish the joint state goal
                 joint_state = JointState()
@@ -207,16 +213,13 @@ class Leap2Gen3(object):
                 joint_state.name = self.joint_names
                 joint_state.position = new_position 
                 self.pub_ik_joint_state_goal.publish(joint_state)
+
+                # Sleep for the remainder of the loop
+                self.rate.sleep()
             
             else:
-                rospy.logerr("IK solution not found")
-
-            # Clear the last hand pose
-            self.last_hand_pose = None
-            self.last_joint_state = None
-
-            # Sleep for the remainder of the loop
-            self.rate.sleep()
+                rospy.logwarn("IK solution not found")
+            
         
     
     def hand_pose_callback(self, data):
