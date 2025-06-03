@@ -6,21 +6,19 @@ ROS node to control the Kinova Gen3 robot arm with a Robotiq 2F-85 gripper using
 
 import rospy
 import tf2_ros
-import tf
-import tf2_geometry_msgs
-from geometry_msgs.msg import PoseStamped
 from sensor_msgs.msg import Range, JointState
 from leap_motion_controller.msg import Hand
-from kortex_driver.msg import *
+from kortex_driver.msg import TwistCommand, BaseCyclic_Feedback, ActionEvent
 from kortex_driver.srv import *
 from control_msgs.msg import GripperCommandActionGoal
 import moveit_commander
 import moveit_msgs.msg
 import numpy as np
 import sys
+import leap_common as lc
 
 
-class KinovaTeleop(object):
+class KinovaTeleopSingle(object):
     def __init__(self):
         # Initialize the node
         self.robot_name = rospy.get_param('robot_name')
@@ -41,6 +39,8 @@ class KinovaTeleop(object):
         self.mismatch_threshold = rospy.get_param("mismatch_threshold") # m
         self.pinch_threshold = rospy.get_param("pinch_threshold") # m [0-1]
         self.control_gripper = rospy.get_param("control_gripper") # true/false
+        self.inactivity_timeout = rospy.get_param("inactivity_timeout") # s (-1 for infinite)
+        self.last_command_time = None
 
         # Create the MoveItInterface necessary objects
         moveit_commander.roscpp_initialize(sys.argv)
@@ -73,8 +73,6 @@ class KinovaTeleop(object):
             gripper_joint_names = rospy.get_param(self.robot_name + "/gripper_joint_names", [])
             gripper_joint_name = gripper_joint_names[0]
             self.gripper_joint = self.moveit_robot.get_joint(gripper_joint_name)
-            self.gripper_max_absolute_pos = self.gripper_joint.max_bound()
-            self.gripper_min_absolute_pos = self.gripper_joint.min_bound()
             rospy.loginfo("Gripper control enabled")
         else:
             self.gripper_joint_name = ""
@@ -144,99 +142,6 @@ class KinovaTeleop(object):
         rospy.loginfo('Stopping the arm and shutting down...')
         self.stop()
 
-
-    def leap_to_arm_workspace(self, hand_pose):
-        '''Transform the hand position to the robot workspace'''
-
-        # Convert Leap Motion position to normalised range [0, 1]
-        hand_pose.position.x = (hand_pose.position.x - self.leap_ws_min[0]) / (self.leap_ws_max[0] - self.leap_ws_min[0])
-        hand_pose.position.y = (hand_pose.position.y - self.leap_ws_min[1]) / (self.leap_ws_max[1] - self.leap_ws_min[1])
-        hand_pose.position.z = (hand_pose.position.z - self.leap_ws_min[2]) / (self.leap_ws_max[2] - self.leap_ws_min[2])
-
-        # Apply linear scaling to the arm workspace
-        hand_pose.position.x = hand_pose.position.x * (self.arm_ws_max[0] - self.arm_ws_min[0]) + self.arm_ws_min[0]
-        hand_pose.position.y = hand_pose.position.y * (self.arm_ws_max[1] - self.arm_ws_min[1]) + self.arm_ws_min[1]
-        hand_pose.position.z = hand_pose.position.z * (self.arm_ws_max[2] - self.arm_ws_min[2]) + self.arm_ws_min[2]
-
-        return hand_pose
-
-    
-    def tool_pose_to_ref_frame(self, pose):
-        '''Transform the arm state to the reference frame'''
-        # Get the transform from the arm base to the world frame
-        try:
-            transform = self.tf_buffer.lookup_transform(self.arm_ref_frame, self.arm_base_link, rospy.Time(0), timeout=rospy.Duration(0.1))
-        except (tf2_ros.LookupException, tf2_ros.ConnectivityException, tf2_ros.ExtrapolationException) as e:
-            rospy.logerr("Error when transforming arm state to reference frame: " + str(e))
-            return None
-        # Transform the tool pose to the reference frame
-        new_pose = tf2_geometry_msgs.do_transform_pose(pose, transform)
-        new_pose.header.frame_id = self.arm_ref_frame 
-        
-        return new_pose
-    
-
-    def mismatch_hand_arm(self, hand_pose, tool_pose):
-        '''Check if the hand pose is aligned with the arm state. Returns the euclidean distance between the two'''
-        try:
-            return np.sqrt((hand_pose.position.x - tool_pose.pose.position.x)**2 + 
-                        (hand_pose.position.y - tool_pose.pose.position.y)**2 + 
-                        (hand_pose.position.z - tool_pose.pose.position.z)**2)    
-        except Exception as e:
-            rospy.logerr("Error when calculating mismatch between hand and arm: " + str(e))
-            return np.inf
-
-    def scale_vel_log(self, vel):
-        '''Logarithmically scale the velocity'''
-        return np.sign(vel) * np.log(1 + abs(vel) * self.vel_scale_factor) / np.log(1 + self.vel_scale_factor)
-    
-
-    def reach_arm_position(self, hand_pose, tool_pose):
-        '''Move the arm to the hand position'''
-        # Calculate the velocity command to move the arm to the hand position
-        arm_vel = TwistCommand()
-        arm_vel.reference_frame = 0
-        # Linear velocity in m/s
-        pos_x_diff = (hand_pose.position.x - tool_pose.pose.position.x)
-        pos_y_diff = (hand_pose.position.y - tool_pose.pose.position.y)
-        pos_z_diff = (hand_pose.position.z - tool_pose.pose.position.z)
-        arm_vel.twist.linear_x = np.clip(self.scale_vel_log(pos_x_diff), -self.max_linear_vel, self.max_linear_vel)
-        arm_vel.twist.linear_y = np.clip(self.scale_vel_log(pos_y_diff), -self.max_linear_vel, self.max_linear_vel)
-        arm_vel.twist.linear_z = np.clip(self.scale_vel_log(pos_z_diff), -self.max_linear_vel, self.max_linear_vel)
-        
-        # Convert orientation from quaternion to euler angles
-        q_hand = [hand_pose.orientation.x, hand_pose.orientation.y, hand_pose.orientation.z, hand_pose.orientation.w]
-        hand_theta_x, hand_theta_y, hand_theta_z = tf.transformations.euler_from_quaternion(q_hand)
-
-        # Add correction to the orientation of the hand
-        hand_theta_x = - hand_theta_x 
-        hand_theta_y = hand_theta_y + np.pi/2
-        hand_theta_z = hand_theta_z + np.pi/2
-
-        # Get enf effector orientation in euler
-        q_tool = [tool_pose.pose.orientation.x, tool_pose.pose.orientation.y, tool_pose.pose.orientation.z, tool_pose.pose.orientation.w]
-        tool_theta_x, tool_theta_y, tool_theta_z = tf.transformations.euler_from_quaternion(q_tool)
-        
-        theta_x_diff = hand_theta_y - tool_theta_x
-        theta_y_diff = hand_theta_z - tool_theta_z
-        theta_z_diff = - (hand_theta_x - tool_theta_y)
-        arm_vel.twist.angular_x = np.clip(self.scale_vel_log(theta_x_diff), -self.max_angular_vel, self.max_angular_vel)
-        arm_vel.twist.angular_y = np.clip(self.scale_vel_log(theta_y_diff), -self.max_angular_vel, self.max_angular_vel)
-        arm_vel.twist.angular_z = self.scale_vel_log(theta_z_diff) # no need to clip since this rotation is alreadu super slow
-
-        # Publish the velocity command
-        self.pub_arm_vel.publish(arm_vel)
-
-    
-    def reach_gripper_position(self, relative_position):
-        '''Move the gripper to a relative position between 0 and 1'''
-        try:
-            pos = relative_position* (self.gripper_max_absolute_pos - self.gripper_min_absolute_pos) + self.gripper_min_absolute_pos
-            val = self.gripper_joint.move(pos, wait=True)
-            return val
-        except:
-            return False 
-        
     
     def run(self):
         '''Main loop to control the arm'''
@@ -258,7 +163,13 @@ class KinovaTeleop(object):
             # Check if the hand pose is received
             if hand_pose is None or pinch_state is None:
                 rospy.loginfo_throttle(10, "Waiting for hand pose...")
-                self.stop()
+                if self.last_command_time != None and self.inactivity_timeout > 0 and (rospy.Time.now() - self.last_command_time).to_sec() > self.inactivity_timeout:
+                    rospy.loginfo("No hand pose received in " + str(self.inactivity_timeout) + " seconds. Going to ready pose...")
+                    # Go to "ready" pose
+                    self.go_to(self.ready_pose)
+                    self.last_command_time = None
+                else:
+                    self.stop()
                 self.rate.sleep()
                 continue
 
@@ -267,10 +178,10 @@ class KinovaTeleop(object):
             gripper_state = self.last_gripper_state
 
             # Transform the hand position and orientation to the base frame
-            hand_pose = self.leap_to_arm_workspace(hand_pose)
+            hand_pose = lc.leap_to_arm_workspace(hand_pose, self.arm_ws_min, self.arm_ws_max, self.leap_ws_min, self.leap_ws_max)
 
             # Check that the hand pose is aligned with the current arm state
-            diff = self.mismatch_hand_arm(hand_pose, arm_state)
+            diff = lc.mismatch_hand_arm(hand_pose, arm_state)
             if diff > self.mismatch_threshold:
                 rospy.loginfo_throttle(1, "Waiting for hand pose to align with arm...")
                 self.rate.sleep()
@@ -282,20 +193,16 @@ class KinovaTeleop(object):
             rospy.loginfo_throttle(60, "Sending velocity commands to the arm...")
 
             # Control the arm
-            self.reach_arm_position(hand_pose, arm_state)
+            lc.reach_arm_position(hand_pose, arm_state, self.pub_arm_vel,
+                                  self.vel_scale_factor, self.max_linear_vel, self.max_angular_vel)
 
             # Control the gripper
             if self.control_gripper and self.is_gripper_present:
-                if pinch_state <= self.pinch_threshold:
-                    pinch_state = 0.0
-                elif pinch_state >= (1 - self.pinch_threshold):
-                    pinch_state = 1.0
-                if (pinch_state == 0.0 or pinch_state == 1.0) and gripper_state != pinch_state:
-                    rospy.loginfo("Changing gripper state to " + str(pinch_state))
-                    self.reach_gripper_position(pinch_state)
+                lc.gripper_binary_control(pinch_state, gripper_state, self.gripper_joint, self.pinch_threshold)
 
             # Clear the last hand pose
             self.last_hand_pose = None
+            self.last_command_time = rospy.Time.now()
 
             # Sleep for the remainder of the loop
             self.rate.sleep()
@@ -312,30 +219,11 @@ class KinovaTeleop(object):
 
 
     def arm_state_callback(self, data):
-        # Get the tool pose
-        tool_pose = PoseStamped()
-        tool_pose.header.frame_id = self.arm_base_link
-        tool_pose.pose.position.x = data.base.tool_pose_x
-        tool_pose.pose.position.y = data.base.tool_pose_y
-        tool_pose.pose.position.z = data.base.tool_pose_z
-        # Euler to quaternion
-        q = tf.transformations.quaternion_from_euler(np.radians(data.base.tool_pose_theta_x), np.radians(data.base.tool_pose_theta_y), np.radians(data.base.tool_pose_theta_z))
-        tool_pose.pose.orientation.x = q[0]
-        tool_pose.pose.orientation.y = q[1]
-        tool_pose.pose.orientation.z = q[2]
-        tool_pose.pose.orientation.w = q[3]
-
-        if self.arm_base_link == self.arm_ref_frame:
-            self.last_arm_state = tool_pose
-        else:
-            # Transform to the arm base frame
-            self.last_arm_state = self.tool_pose_to_ref_frame(tool_pose)            
+        self.last_arm_state = lc.process_arm_state(data, self.arm_base_link, self.arm_ref_frame, self.tf_buffer)
 
     
     def gripper_state_callback(self, data):
-        # Get the current gripper state
-        raw_state = data.position[self.degrees_of_freedom]
-        self.last_gripper_state = 0.0 if raw_state < 0.1 else 1.0
+        self.last_gripper_state = lc.process_gripper_state(data)
 
 
     def action_topic_callback(self, notif):
@@ -355,27 +243,16 @@ class KinovaTeleop(object):
                 self.rate.sleep()
 
 
-    def reach_named_position(self, target):
-        '''Go to a named target'''       
-        # Going to one of those targets
-        rospy.loginfo("Going to named target " + target)
-        # Set the target
-        self.moveit_arm_group.set_named_target(target)
-        # Plan the trajectory
-        success_flag, trajectory_message, planning_time, error_code = self.moveit_arm_group.plan()
-        # Execute the trajectory and block while it's not finished
-        return self.moveit_arm_group.execute(trajectory_message, wait=True)
-
-
     def go_to(self, pose_name, open_gripper=True):
         '''Go to the home position'''
-        reach_pose = self.reach_named_position(pose_name)
+        reach_pose = lc.reach_named_position(self.moveit_arm_group, pose_name)
         if open_gripper and self.control_gripper and self.is_gripper_present:
-            open = self.reach_gripper_position(0.0)
+            open = lc.reach_gripper_position(0.0, self.gripper_joint)
         else:
             open = True
         return reach_pose and open
     
+
     def stop(self):
         arm_vel = TwistCommand()
         arm_vel.reference_frame = 0
@@ -388,6 +265,7 @@ class KinovaTeleop(object):
         self.pub_arm_vel.publish(arm_vel)
 
 
+
 if __name__ == '__main__':
-    teleop = KinovaTeleop()
+    teleop = KinovaTeleopSingle()
     teleop.run()

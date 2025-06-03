@@ -6,8 +6,8 @@ arm_base_link: "base_link"
 arm_reference_frame: "base_link"
 arm_workspace_min: [0.0, -1.3, 0.0] # m in reference frame
 arm_workspace_max: [1.6, 1.3, 1.6] # m in reference frame
-leap_workspace_min: [-0.35, -0.45, 0.1] # m in leap motion frame
-leap_workspace_max: [0.35, 0.45, 0.7] # m in leap motion frame
+leap_workspace_min: [-0.4, -0.5, 0.05] # m in leap motion frame
+leap_workspace_max: [0.4, 0.5, 0.7] # m in leap motion frame
 
 # MoveIt!
 moveit_max_acc: 0.2 # %
@@ -21,5 +21,9 @@ max_linear_vel: 1.0 # m/s
 max_angular_vel: 1.57 # rad/s
 mismatch_threshold: 0.5 # m in arm base frame
 pinch_threshold: 0.35 # where 0.5 means 50% of the range
-control_gripper: true
 inactivity_timeout: 5.0 # s (-1 to disable)
+
+# Robotiq 2f 85 gripper (optional)
+control_gripper: true
+home_gripper_position: 1.0 # fully closed
+ready_gripper_position: 0.0 # fully open
