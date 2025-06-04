@@ -16,7 +16,7 @@ home_pose_name: "retract"
 ready_pose_name: "home"
 
 # Teleoperation
-vel_scale_factor: 2.0 # %
+vel_scale_factor: 1.5 # %
 max_linear_vel: 1.0 # m/s
 max_angular_vel: 1.57 # rad/s
 mismatch_threshold: 0.5 # m in arm base frame
