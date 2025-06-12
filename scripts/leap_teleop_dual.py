@@ -205,7 +205,7 @@ class KinovaTeleopDual(object):
 
             if left_hand_pose is not None:
                 # Transform the hand position and orientation to the base frame
-                left_hand_pose = self.leap_to_arm_workspace(left_hand_pose, self.arm1_ws_min, self.arm1_ws_max, self.l_hand_ws_min, self.l_hand_ws_max)
+                left_hand_pose = lc.leap_to_arm_workspace(left_hand_pose, self.arm1_ws_min, self.arm1_ws_max, self.l_hand_ws_min, self.l_hand_ws_max)
                 # Check that the hand pose is aligned with the current arm state
                 diff_left = lc.mismatch_hand_arm(left_hand_pose, arm1_state)
                 if diff_left > self.mismatch_threshold:
