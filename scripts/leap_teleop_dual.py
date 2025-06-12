@@ -39,7 +39,8 @@ class KinovaTeleopDual(object):
         self.max_angular_vel = rospy.get_param("max_angular_vel") # rad/s
         self.mismatch_threshold = rospy.get_param("mismatch_threshold") # m
         self.pinch_threshold = rospy.get_param("pinch_threshold") # m [0-1]
-        self.control_gripper = rospy.get_param("control_gripper") # true/false
+        self.control_gripper_right = rospy.get_param("control_gripper_right") # true/false
+        self.control_gripper_left = rospy.get_param("control_gripper_left")
         self.inactivity_timeout = rospy.get_param("inactivity_timeout") # s (-1 for infinite)
         self.last_command_time = None
 
@@ -73,17 +74,17 @@ class KinovaTeleopDual(object):
         self.r_hand_ws_max = rospy.get_param("r_hand_workspace_max")
 
         # Gripper setup
-        if self.control_gripper:
+        if self.control_gripper_left:
             gripper1_joint_names = rospy.get_param(self.robot1_name + "/gripper_joint_names", [])
             gripper1_joint_name = gripper1_joint_names[0]
             self.gripper1_joint = self.moveit_robot.get_joint(gripper1_joint_name)
+            rospy.loginfo("Left gripper control enabled")
+        if self.control_gripper_right:
             gripper2_joint_names = rospy.get_param(self.robot2_name + "/gripper_joint_names", [])
             gripper2_joint_name = gripper2_joint_names[0]
             self.gripper2_joint = self.moveit_robot.get_joint(gripper2_joint_name)
-            rospy.loginfo("Gripper control enabled")
-        else:
-            rospy.loginfo("Gripper control disabled")
-       
+            rospy.loginfo("Rigth gripper control enabled")
+
         rospy.loginfo("Initializing node in namespace " + rospy.get_namespace())
 
         # Subscribe to the Leap data
@@ -234,8 +235,9 @@ class KinovaTeleopDual(object):
                                           self.vel_scale_factor, self.max_linear_vel, self.max_angular_vel)
 
             # Control the grippers
-            if self.control_gripper:
+            if self.control_gripper_left:
                 lc.gripper_binary_control(left_pinch_state, gripper1_state, self.gripper1_joint, self.pinch_threshold)
+            if self.control_gripper_right:
                 lc.gripper_binary_control(right_pinch_state, gripper2_state, self.gripper2_joint, self.pinch_threshold)
 
             # Clear the last hand pose
@@ -307,13 +309,13 @@ class KinovaTeleopDual(object):
         '''Go to the home position'''
         reach_pose = lc.reach_named_position(self.moveit_arm_group, pose_name)
 
-        if open_gripper and self.control_gripper:
-            open1 = lc.reach_gripper_position(0.0, self.gripper1_joint)
-            open2 = lc.reach_gripper_position(0.0, self.gripper2_joint)
-            open = open1 and open2
-        else:
-            open = True
-        return reach_pose and open
+        if open_gripper:
+            open1 = open2 = True
+            if self.control_gripper_left:
+                open1 = lc.reach_gripper_position(0.0, self.gripper1_joint)
+            if self.control_gripper_right:
+                open2 = lc.reach_gripper_position(0.0, self.gripper2_joint)
+        return reach_pose and open1 and open2
 
     
     def stop(self, publisher):
