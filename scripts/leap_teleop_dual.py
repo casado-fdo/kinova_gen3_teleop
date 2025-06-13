@@ -104,8 +104,9 @@ class KinovaTeleopDual(object):
         rospy.loginfo("Subscribed to arm state from /" + self.robot1_name + "/base_feedback")
         # Create publisher for cartesian velocity commands
         self.pub_arm1_vel = rospy.Publisher('/' + self.robot1_name + '/in/cartesian_velocity', TwistCommand, queue_size=10)        
-        # Create publisher for gripper commands
-        self.pub_gripper1 = rospy.Publisher('/' + self.robot1_name + '/robotiq_2f_85_gripper_controller/gripper_cmd/goal', GripperCommandActionGoal, queue_size=10)
+        if self.control_gripper_left:
+            # Create publisher for gripper commands
+            self.pub_gripper1 = rospy.Publisher('/' + self.robot1_name + '/robotiq_2f_85_gripper_controller/gripper_cmd/goal', GripperCommandActionGoal, queue_size=10)
         # Initialize the hand pose and arm state
         self.last_left_hand_pose= None
         self.last_left_pinch_state = 0.0
@@ -119,8 +120,9 @@ class KinovaTeleopDual(object):
         rospy.loginfo("Subscribed to arm state from /" + self.robot2_name + "/base_feedback")
         # Create publisher for cartesian velocity commands
         self.pub_arm2_vel = rospy.Publisher('/' + self.robot2_name + '/in/cartesian_velocity', TwistCommand, queue_size=10)
-        # Create publisher for gripper commands
-        self.pub_gripper2 = rospy.Publisher('/' + self.robot2_name + '/robotiq_2f_85_gripper_controller/gripper_cmd/goal', GripperCommandActionGoal, queue_size=10)
+        if self.control_gripper_right:
+            # Create publisher for gripper commands
+            self.pub_gripper2 = rospy.Publisher('/' + self.robot2_name + '/robotiq_2f_85_gripper_controller/gripper_cmd/goal', GripperCommandActionGoal, queue_size=10)
         # Initialize the hand pose and arm state
         self.last_right_hand_pose= None
         self.last_right_pinch_state = 0.0
