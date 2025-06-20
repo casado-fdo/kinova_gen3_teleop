@@ -105,7 +105,7 @@ class KinovaTeleopDual(object):
         if self.control_gripper_left:
             # Create publisher for gripper commands
             self.pub_gripper1 = rospy.Publisher('/' + self.robot1_name + '/robotiq_2f_85_gripper_controller/gripper_cmd/goal', GripperCommandActionGoal, queue_size=10)
-            self.sub_right_hand_pinch = rospy.Subscriber(right_hand_data + '/pinch', Range, self.right_hand_pinch_callback)
+            self.sub_left_hand_pinch = rospy.Subscriber(left_hand_data + '/pinch', Range, self.left_hand_pinch_callback)
         # Initialize the hand pose and arm state
         self.last_left_hand_pose= None
         self.last_left_pinch_state = 0.0
@@ -122,7 +122,7 @@ class KinovaTeleopDual(object):
         if self.control_gripper_right:
             # Create publisher for gripper commands
             self.pub_gripper2 = rospy.Publisher('/' + self.robot2_name + '/robotiq_2f_85_gripper_controller/gripper_cmd/goal', GripperCommandActionGoal, queue_size=10)
-            self.sub_left_hand_pinch = rospy.Subscriber(left_hand_data + '/pinch', Range, self.left_hand_pinch_callback)
+            self.sub_right_hand_pinch = rospy.Subscriber(right_hand_data + '/pinch', Range, self.right_hand_pinch_callback)
         # Initialize the hand pose and arm state
         self.last_right_hand_pose= None
         self.last_right_pinch_state = 0.0
@@ -253,12 +253,12 @@ class KinovaTeleopDual(object):
     
     def left_hand_pose_callback(self, data):
         # Get the position and orientation of the hand
-        self.last_left_hand_pose = data.palm_center
+        self.last_left_hand_pose = data.palm_center_filtered
 
     
     def right_hand_pose_callback(self, data):
         # Get the position and orientation of the hand
-        self.last_right_hand_pose = data.palm_center
+        self.last_right_hand_pose = data.palm_center_filtered
     
 
     def left_hand_pinch_callback(self, data):

@@ -210,7 +210,7 @@ class KinovaTeleopSingle(object):
     
     def hand_pose_callback(self, data):
         # Get the position and orientation of the hand
-        self.last_hand_pose = data.palm_center
+        self.last_hand_pose = data.palm_center_filtered
     
 
     def hand_pinch_callback(self, data):
