@@ -86,8 +86,13 @@ class KinovaTeleopSingle(object):
         self.leap_hand = rospy.get_param("leap_hand", "right")
         hand_data = self.leap_ns + '/hands/' + self.leap_hand
         self.sub_hand_pose = rospy.Subscriber(hand_data, Hand, self.hand_pose_callback)
-        self.sub_hand_pinch = rospy.Subscriber(hand_data + '/pinch', Range, self.hand_pinch_callback)
+        if self.is_gripper_present:
+            self.sub_hand_pinch = rospy.Subscriber(hand_data + '/pinch', Range, self.hand_pinch_callback)
         rospy.loginfo("Subscribed to Leap Motion data from " + hand_data) 
+
+        # Initialize TF listener
+        self.tf_buffer = tf2_ros.Buffer()
+        self.tf_listener = tf2_ros.TransformListener(self.tf_buffer)
 
         # Subscribe to the arm and gripper state
         self.sub_arm_state = rospy.Subscriber('/' + self.robot_name + '/base_feedback', BaseCyclic_Feedback, self.arm_state_callback)
@@ -107,14 +112,10 @@ class KinovaTeleopSingle(object):
         self.last_arm_state = None
 
         # Setup the rate for the main loop
-        self.rate = rospy.Rate(50)
+        self.rate = rospy.Rate(10)
 
         # Handle user keyboard interrupt properly
         rospy.on_shutdown(self.signal_term_handler)
-
-        # Initialize TF listener
-        self.tf_buffer = tf2_ros.Buffer()
-        self.tf_listener = tf2_ros.TransformListener(self.tf_buffer)
     
 
     def signal_term_handler(self):
@@ -177,8 +178,12 @@ class KinovaTeleopSingle(object):
             arm_state = self.last_arm_state
             gripper_state = self.last_gripper_state
 
-            # Transform the hand position and orientation to the base frame
+            # Transform the hand position and orientation to the reference frame
             hand_pose = lc.leap_to_arm_workspace(hand_pose, self.arm_ws_min, self.arm_ws_max, self.leap_ws_min, self.leap_ws_max)
+
+            # debug hand pose and arm state
+            #rospy.loginfo("Hand pose x: %.2f, z: %.2f" % (hand_pose.position.x, hand_pose.position.z))
+            #rospy.loginfo("Arm state x: %.2f, z: %.2f" % (arm_state.pose.position.x, arm_state.pose.position.z))
 
             # Check that the hand pose is aligned with the current arm state
             diff = lc.mismatch_hand_arm(hand_pose, arm_state)
@@ -194,6 +199,7 @@ class KinovaTeleopSingle(object):
 
             # Control the arm
             lc.reach_arm_position(hand_pose, arm_state, self.pub_arm_vel,
+                                  self.arm_base_link, self.arm_ref_frame, self.tf_buffer,
                                   self.vel_scale_factor, self.max_linear_vel, self.max_angular_vel)
 
             # Control the gripper

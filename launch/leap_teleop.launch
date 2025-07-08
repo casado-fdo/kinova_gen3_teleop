@@ -1,7 +1,7 @@
 <launch>
     <arg name="config_file" default="$(find kinova_gen3_teleop)/cfg/default.yaml"/>
-    <arg name="node_name" default="leap_teleop"/>
-    <arg name="robot_name" default="my_gen3"/>
+    <arg name="node_name"   default="leap_teleop"/>
+    <arg name="robot_name"  default="my_gen3"/>
 
     <group ns="$(arg robot_name)">
         <rosparam file="$(arg config_file)" command="load"/>

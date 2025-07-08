@@ -4,7 +4,7 @@ import tf
 import tf2_ros
 import tf2_geometry_msgs
 import numpy as np
-from geometry_msgs.msg import PoseStamped
+from geometry_msgs.msg import PoseStamped, Pose
 from kortex_driver.msg import TwistCommand
 
 
@@ -15,6 +15,11 @@ def leap_to_arm_workspace(hand_pose, arm_ws_min, arm_ws_max, hand_ws_min, hand_w
         hand_pose.position.x = (hand_pose.position.x - hand_ws_min[0]) / (hand_ws_max[0] - hand_ws_min[0])
         hand_pose.position.y = (hand_pose.position.y - hand_ws_min[1]) / (hand_ws_max[1] - hand_ws_min[1])
         hand_pose.position.z = (hand_pose.position.z - hand_ws_min[2]) / (hand_ws_max[2] - hand_ws_min[2])
+
+        # Ensure the position is within the range [0, 1]
+        hand_pose.position.x = max(0.0, min(1.0, hand_pose.position.x))
+        hand_pose.position.y = max(0.0, min(1.0, hand_pose.position.y))
+        hand_pose.position.z = max(0.0, min(1.0, hand_pose.position.z))
 
         # Apply linear scaling to the arm workspace
         hand_pose.position.x = hand_pose.position.x * (arm_ws_max[0] - arm_ws_min[0]) + arm_ws_min[0]
@@ -80,19 +85,16 @@ def scale_vel_log(vel, vel_scale_factor=1.0):
     return np.sign(vel) * np.log(1 + abs(vel) * vel_scale_factor) / np.log(1 + vel_scale_factor)
 
 
-def reach_arm_position(hand_pose, tool_pose, pub_arm_vel, vel_scale_factor=1.0, max_linear_vel=1.0, max_angular_vel=1.57):
+def reach_arm_position(hand_pose, tool_pose, pub_arm_vel, 
+                       base_frame, ref_frame, tf_buffer,
+                       vel_scale_factor=1.0, max_linear_vel=1.0, max_angular_vel=1.57):
     '''Move the arm to the hand position'''
     # Calculate the velocity command to move the arm to the hand position
-    arm_vel = TwistCommand()
-    arm_vel.reference_frame = 0
     # Linear velocity in m/s
     pos_x_diff = (hand_pose.position.x - tool_pose.pose.position.x)
     pos_y_diff = (hand_pose.position.y - tool_pose.pose.position.y)
     pos_z_diff = (hand_pose.position.z - tool_pose.pose.position.z)
-    arm_vel.twist.linear_x = np.clip(scale_vel_log(pos_x_diff, vel_scale_factor), -max_linear_vel, max_linear_vel)
-    arm_vel.twist.linear_y = np.clip(scale_vel_log(pos_y_diff, vel_scale_factor), -max_linear_vel, max_linear_vel)
-    arm_vel.twist.linear_z = np.clip(scale_vel_log(pos_z_diff, vel_scale_factor), -max_linear_vel, max_linear_vel)
-    
+
     # Convert orientation from quaternion to euler angles
     q_hand = [hand_pose.orientation.x, hand_pose.orientation.y, hand_pose.orientation.z, hand_pose.orientation.w]
     hand_theta_x, hand_theta_y, hand_theta_z = tf.transformations.euler_from_quaternion(q_hand)
@@ -109,12 +111,31 @@ def reach_arm_position(hand_pose, tool_pose, pub_arm_vel, vel_scale_factor=1.0, 
     theta_x_diff = hand_theta_y - tool_theta_x
     theta_y_diff = hand_theta_z - tool_theta_z
     theta_z_diff = - (hand_theta_x - tool_theta_y)
-    arm_vel.twist.angular_x = np.clip(scale_vel_log(theta_x_diff), -max_angular_vel, max_angular_vel)
-    arm_vel.twist.angular_y = np.clip(scale_vel_log(theta_y_diff), -max_angular_vel, max_angular_vel)
-    arm_vel.twist.angular_z = scale_vel_log(theta_z_diff) # no need to clip since this rotation is alreadu super slow
 
-    # Publish the velocity command
-    pub_arm_vel.publish(arm_vel)
+    diff_pose = PoseStamped()
+    diff_pose.header.frame_id = ref_frame
+    diff_pose.pose.position.x = pos_x_diff
+    diff_pose.pose.position.y = pos_y_diff
+    diff_pose.pose.position.z = pos_z_diff
+    diff_pose.pose.orientation = tool_pose.pose.orientation
+
+    # If the base frame is not the reference frame, transform diff_pose back to the arm base frame
+    if base_frame != ref_frame:
+        diff_pose = tool_pose_to_ref_frame(diff_pose, ref_frame, base_frame, tf_buffer)
+
+    if diff_pose is not None:
+        #q_tool = [diff_pose.orientation.x, diff_pose.orientation.y, diff_pose.orientation.z, diff_pose.orientation.w]
+        arm_vel = TwistCommand()
+        arm_vel.reference_frame = 0
+        arm_vel.twist.linear_x = np.clip(scale_vel_log(diff_pose.pose.position.x, vel_scale_factor), -max_linear_vel, max_linear_vel)
+        arm_vel.twist.linear_y = np.clip(scale_vel_log(diff_pose.pose.position.y, vel_scale_factor), -max_linear_vel, max_linear_vel)
+        arm_vel.twist.linear_z = np.clip(scale_vel_log(diff_pose.pose.position.z, vel_scale_factor), -max_linear_vel, max_linear_vel)
+        arm_vel.twist.angular_x = np.clip(scale_vel_log(theta_x_diff), -max_angular_vel, max_angular_vel)
+        arm_vel.twist.angular_y = np.clip(scale_vel_log(theta_y_diff), -max_angular_vel, max_angular_vel)
+        arm_vel.twist.angular_z = scale_vel_log(theta_z_diff) # no need to clip since this rotation is already super slow
+
+        # Publish the velocity command
+        pub_arm_vel.publish(arm_vel)
 
 
 def reach_gripper_position(relative_position, gripper_joint):
