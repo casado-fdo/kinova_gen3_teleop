@@ -112,7 +112,7 @@ class KinovaTeleopSingle(object):
         self.last_arm_state = None
 
         # Setup the rate for the main loop
-        self.rate = rospy.Rate(10)
+        self.rate = rospy.Rate(25)
 
         # Handle user keyboard interrupt properly
         rospy.on_shutdown(self.signal_term_handler)
@@ -180,10 +180,6 @@ class KinovaTeleopSingle(object):
 
             # Transform the hand position and orientation to the reference frame
             hand_pose = lc.leap_to_arm_workspace(hand_pose, self.arm_ws_min, self.arm_ws_max, self.leap_ws_min, self.leap_ws_max)
-
-            # debug hand pose and arm state
-            #rospy.loginfo("Hand pose x: %.2f, z: %.2f" % (hand_pose.position.x, hand_pose.position.z))
-            #rospy.loginfo("Arm state x: %.2f, z: %.2f" % (arm_state.pose.position.x, arm_state.pose.position.z))
 
             # Check that the hand pose is aligned with the current arm state
             diff = lc.mismatch_hand_arm(hand_pose, arm_state)
