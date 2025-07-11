@@ -105,6 +105,15 @@ class KinovaTeleopSingle(object):
         # Create publisher for gripper commands
         self.pub_gripper = rospy.Publisher('/' + self.robot_name + '/robotiq_2f_85_gripper_controller/gripper_cmd/goal', GripperCommandActionGoal, queue_size=10)
 
+        # Clear any faults
+        clear_faults_full_name = '/' + self.robot_name + '/base/clear_faults'
+        rospy.wait_for_service(clear_faults_full_name)
+        self.clear_faults = rospy.ServiceProxy(clear_faults_full_name, Base_ClearFaults)
+        try:
+            self.clear_faults()
+        except rospy.ServiceException as e:
+            rospy.logerr("Failed to clear faults: " + str(e))
+
         # Initialize the hand pose and arm state
         self.last_hand_pose= None
         self.last_pinch_state = 0.0
