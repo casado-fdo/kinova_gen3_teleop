@@ -62,8 +62,8 @@ class KinovaTeleopDual(object):
         # Robot reference frame
         self.arm1_base_link = rospy.get_param("arm1_base_link")
         self.arm2_base_link = rospy.get_param("arm2_base_link")
-        self.reference_frame = rospy.get_param("reference_frame")
-        rospy.loginfo("Transforming arm state to reference frame " + self.reference_frame)
+        self.arm_ref_frame = rospy.get_param("arm_ref_frame")
+        rospy.loginfo("Transforming arm state to reference frame " + self.arm_ref_frame)
 
         # Robot workspace boundaries
         self.arm1_ws_min = rospy.get_param("arm1_workspace_min")
@@ -99,6 +99,10 @@ class KinovaTeleopDual(object):
         self.sub_left_hand_pose = rospy.Subscriber(left_hand_data, Hand, self.left_hand_pose_callback)
         rospy.loginfo("Subscribed to Leap Motion data from " + right_hand_data + " and " + left_hand_data)
 
+        # Initialize TF listener
+        self.tf_buffer = tf2_ros.Buffer()
+        self.tf_listener = tf2_ros.TransformListener(self.tf_buffer)
+
         # Robot 1
         # Subscribe to the arm and gripper state
         self.sub_arm1_state = rospy.Subscriber('/' + self.robot1_name + '/base_feedback', BaseCyclic_Feedback, self.arm1_state_callback)
@@ -115,6 +119,14 @@ class KinovaTeleopDual(object):
         self.last_left_pinch_state = 0.0
         self.last_gripper1_state = None
         self.last_arm1_state = None
+        # Clear any faults
+        clear_faults_srv_arm1 = '/' + self.robot1_name + '/base/clear_faults'
+        rospy.wait_for_service(clear_faults_srv_arm1)
+        self.clear_faults_arm1 = rospy.ServiceProxy(clear_faults_srv_arm1, Base_ClearFaults)
+        try:
+            self.clear_faults_arm1()
+        except rospy.ServiceException as e:
+            rospy.logerr("Failed to clear faults for left arm: " + str(e))
 
         # Robot 2
         # Subscribe to the arm and gripper state
@@ -132,17 +144,21 @@ class KinovaTeleopDual(object):
         self.last_right_pinch_state = 0.0
         self.last_gripper2_state = None
         self.last_arm2_state = None
+        # Clear any faults
+        clear_faults_srv_arm2 = '/' + self.robot2_name + '/base/clear_faults'
+        rospy.wait_for_service(clear_faults_srv_arm2)
+        self.clear_faults_arm2 = rospy.ServiceProxy(clear_faults_srv_arm2, Base_ClearFaults)
+        try:
+            self.clear_faults_arm2()
+        except rospy.ServiceException as e: 
+            rospy.logerr("Failed to clear faults for right arm: " + str(e))
 
         # Setup the rate for the main loop
-        self.rate = rospy.Rate(50)
+        self.rate = rospy.Rate(25)
 
         # Handle user keyboard interrupt properly
         rospy.on_shutdown(self.signal_term_handler)
 
-        # Initialize TF listener
-        self.tf_buffer = tf2_ros.Buffer()
-        self.tf_listener = tf2_ros.TransformListener(self.tf_buffer)
-    
 
     def signal_term_handler(self):
         '''Handles KeyboardInterrupts to ensure smooth exit'''
@@ -222,8 +238,9 @@ class KinovaTeleopDual(object):
                 else:
                     # All good to send velocity commands
                     rospy.loginfo_throttle(60, "Sending velocity commands to the left arm...")
-                    lc.reach_arm_position(left_hand_pose, arm1_state, self.pub_arm1_vel, 
-                                          self.vel_scale_factor, self.max_linear_vel, self.max_angular_vel)
+                    lc.reach_arm_position(left_hand_pose, arm1_state, self.pub_arm1_vel,
+                                        self.arm1_base_link, self.arm_ref_frame, self.tf_buffer, 
+                                        self.vel_scale_factor, self.max_linear_vel, self.max_angular_vel)
 
             if right_hand_pose is not None:
                 # Transform the hand position and orientation to the base frame
@@ -237,8 +254,9 @@ class KinovaTeleopDual(object):
                 else:
                     # All good to send velocity commands
                     rospy.loginfo_throttle(60, "Sending velocity commands to the right arm...")
-                    lc.reach_arm_position(right_hand_pose, arm2_state, self.pub_arm2_vel, 
-                                          self.vel_scale_factor, self.max_linear_vel, self.max_angular_vel)
+                    lc.reach_arm_position(right_hand_pose, arm2_state, self.pub_arm2_vel,
+                                        self.arm2_base_link, self.arm_ref_frame, self.tf_buffer, 
+                                        self.vel_scale_factor, self.max_linear_vel, self.max_angular_vel)
 
             # Control the grippers
             if self.control_gripper_left:
@@ -279,7 +297,7 @@ class KinovaTeleopDual(object):
 
 
     def arm1_state_callback(self, data):
-        self.last_arm1_state = lc.process_arm_state(data, self.arm1_base_link, self.reference_frame, self.tf_buffer)
+        self.last_arm1_state = lc.process_arm_state(data, self.arm1_base_link, self.arm_ref_frame, self.tf_buffer)
 
 
     def gripper1_state_callback(self, data):
@@ -287,7 +305,7 @@ class KinovaTeleopDual(object):
 
 
     def arm2_state_callback(self, data):
-        self.last_arm2_state = lc.process_arm_state(data, self.arm2_base_link, self.reference_frame, self.tf_buffer)
+        self.last_arm2_state = lc.process_arm_state(data, self.arm2_base_link, self.arm_ref_frame, self.tf_buffer)
 
 
     def gripper2_state_callback(self, data):
