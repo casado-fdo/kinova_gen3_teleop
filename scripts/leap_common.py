@@ -124,10 +124,19 @@ def reach_arm_position(hand_pose, tool_pose, pub_arm_vel,
     q_tool = [tool_pose.pose.orientation.x, tool_pose.pose.orientation.y, tool_pose.pose.orientation.z, tool_pose.pose.orientation.w]
     tool_theta_x, tool_theta_y, tool_theta_z = tf.transformations.euler_from_quaternion(q_tool)
     
-    theta_x_diff = hand_theta_y - tool_theta_x
-    theta_y_diff = hand_theta_z - tool_theta_z
-    theta_z_diff = - (hand_theta_x - tool_theta_y)
+    theta_x_diff = np.arctan2(np.sin(hand_theta_y - tool_theta_x), np.cos(hand_theta_y - tool_theta_x)) 
+    theta_y_diff = np.arctan2(np.sin(hand_theta_z - tool_theta_z), np.cos(hand_theta_z - tool_theta_z)) 
+    theta_z_diff = -np.arctan2(np.sin(hand_theta_x - tool_theta_y), np.cos(hand_theta_x - tool_theta_y))
 
+    # Detect singularity (hand_theta_x ~ ±90°)
+    is_singularity = abs(abs(hand_theta_x)- np.pi/2) < 0.175  # within 10°
+
+    if is_singularity:
+        theta_x_diff = 0
+        theta_y_diff = 0
+        theta_z_diff = 0
+
+    # Build velocity command
     arm_vel = TwistCommand()
     arm_vel.reference_frame = 0
     arm_vel.twist.linear_x = np.clip(scale_vel_log(pos_x_diff, vel_scale_factor), -max_linear_vel, max_linear_vel)
@@ -137,8 +146,8 @@ def reach_arm_position(hand_pose, tool_pose, pub_arm_vel,
     arm_vel.twist.angular_y = np.clip(scale_vel_log(theta_y_diff), -max_angular_vel, max_angular_vel)
     arm_vel.twist.angular_z = scale_vel_log(theta_z_diff) # no need to clip since this rotation is already super slow
 
-    # Publish the velocity command
     pub_arm_vel.publish(arm_vel)
+
 
 
 def reach_gripper_position(relative_position, gripper_joint):
