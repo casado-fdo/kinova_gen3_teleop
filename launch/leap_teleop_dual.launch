@@ -1,9 +1,16 @@
 <launch>
+    <arg name="imitation_mode"           default="$(optenv IMITATION_MODE demo_teleop)"/>
     <arg name="config_file" default="$(find kinova_gen3_teleop)/cfg/default.yaml"/>
     <arg name="node_name" default="leap_teleop"/>
 
     <rosparam file="$(arg config_file)" command="load"/>
+    <param name="teleop_source" value="$(eval 'leap_teleop' if imitation_mode == 'demo_teleop' else 'lerobot')" />
 
-    <node name="$(arg node_name)" pkg="kinova_gen3_teleop" type="leap_teleop_dual.py" output="screen" />
+    <!-- Leap to Kinova teleop node for dual arm control (only launched for data collection or demo mode) -->
+    <node name="$(arg node_name)_leap_to_kinova_dual" pkg="kinova_gen3_teleop" type="leap_to_kinova_dual.py" output="screen" unless="$(eval imitation_mode == 'inference')" />
+
+    <!-- Teleop dual controller node (takes control commands coming from direct leap teleoperation or model inference) -->
+    <node name="$(arg node_name)_dual_kinova_teleop" pkg="kinova_gen3_teleop" type="teleop_dual_controller.py" output="screen"/>
+
 
 </launch>

@@ -4,7 +4,7 @@ import tf
 import tf2_ros
 import tf2_geometry_msgs
 import numpy as np
-from geometry_msgs.msg import PoseStamped, Pose
+from geometry_msgs.msg import PoseStamped, Pose, TwistStamped
 from kortex_driver.msg import TwistCommand
 
 
@@ -89,15 +89,15 @@ def scale_vel_log(vel, vel_scale_factor=1.0):
     return np.sign(vel) * np.log(1 + abs(vel) * vel_scale_factor) / np.log(1 + vel_scale_factor)
 
 
-def reach_arm_position(hand_pose, tool_pose, pub_arm_vel, 
+def hand_pose_to_kinova_goal(hand_pose, tool_pose, pub_arm_goal, 
                        base_frame, ref_frame, tf_buffer,
                        vel_scale_factor=1.0, max_linear_vel=1.0, max_angular_vel=1.57):
-    '''Move the arm to the hand position'''
+    '''Convert the hand pose goal to a kinova cartesian velocity command'''
     hand_pose_rf = PoseStamped()
     hand_pose_rf.header.frame_id = ref_frame
     hand_pose_rf.pose.position = hand_pose.position
 
-    # If the base frame is not the reference frame, transform diff_pose back to the arm base frame
+    # If the base frame is not the reference frame, transform back to the arm base frame
     if base_frame != ref_frame:
         hand_pose_bf = tool_pose_to_ref_frame(hand_pose_rf, ref_frame, base_frame, tf_buffer)
         tool_pose_bf = tool_pose_to_ref_frame(tool_pose, ref_frame, base_frame, tf_buffer)
@@ -137,17 +137,31 @@ def reach_arm_position(hand_pose, tool_pose, pub_arm_vel,
         theta_z_diff = 0
 
     # Build velocity command
-    arm_vel = TwistCommand()
-    arm_vel.reference_frame = 0
-    arm_vel.twist.linear_x = np.clip(scale_vel_log(pos_x_diff, vel_scale_factor), -max_linear_vel, max_linear_vel)
-    arm_vel.twist.linear_y = np.clip(scale_vel_log(pos_y_diff, vel_scale_factor), -max_linear_vel, max_linear_vel)
-    arm_vel.twist.linear_z = np.clip(scale_vel_log(pos_z_diff, vel_scale_factor), -max_linear_vel, max_linear_vel)
-    arm_vel.twist.angular_x = np.clip(scale_vel_log(theta_x_diff), -max_angular_vel, max_angular_vel)
-    arm_vel.twist.angular_y = np.clip(scale_vel_log(theta_y_diff), -max_angular_vel, max_angular_vel)
-    arm_vel.twist.angular_z = scale_vel_log(theta_z_diff) # no need to clip since this rotation is already super slow
+    arm_vel = TwistStamped()
+    arm_vel.header.stamp = rospy.Time.now()
+    arm_vel.twist.linear.x = np.clip(scale_vel_log(pos_x_diff, vel_scale_factor), -max_linear_vel, max_linear_vel)
+    arm_vel.twist.linear.y = np.clip(scale_vel_log(pos_y_diff, vel_scale_factor), -max_linear_vel, max_linear_vel)
+    arm_vel.twist.linear.z = np.clip(scale_vel_log(pos_z_diff, vel_scale_factor), -max_linear_vel, max_linear_vel)
+    arm_vel.twist.angular.x = np.clip(scale_vel_log(theta_x_diff), -max_angular_vel, max_angular_vel)
+    arm_vel.twist.angular.y = np.clip(scale_vel_log(theta_y_diff), -max_angular_vel, max_angular_vel)
+    arm_vel.twist.angular.z = scale_vel_log(theta_z_diff)
 
-    pub_arm_vel.publish(arm_vel)
+    pub_arm_goal.publish(arm_vel)
 
+
+def reach_arm_position(arm_vel_command, pub_arm_vel):
+    '''Move the arm towards the desired pose'''
+    # Build Kinova's velocity command
+    kinova_arm_vel = TwistCommand()
+    kinova_arm_vel.reference_frame = 0
+    kinova_arm_vel.twist.linear_x = arm_vel_command.twist.linear.x
+    kinova_arm_vel.twist.linear_y = arm_vel_command.twist.linear.y
+    kinova_arm_vel.twist.linear_z = arm_vel_command.twist.linear.z
+    kinova_arm_vel.twist.angular_x = arm_vel_command.twist.angular.x
+    kinova_arm_vel.twist.angular_y = arm_vel_command.twist.angular.y
+    kinova_arm_vel.twist.angular_z = arm_vel_command.twist.angular.z
+
+    pub_arm_vel.publish(kinova_arm_vel)
 
 
 def reach_gripper_position(relative_position, gripper_joint):
