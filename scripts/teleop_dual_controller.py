@@ -159,7 +159,7 @@ class KinovaTeleopDual(object):
             left_vel_command = self.last_left_vel_command
 
             # Check if at least one of the hand poses is received
-            if right_vel_command is None and left_vel_command is None:
+            if self.is_twist_msg_empty(right_vel_command) and self.is_twist_msg_empty(left_vel_command):
                 rospy.loginfo_throttle(10, "Waiting for hand pose...")
                 if self.last_command_time != None and self.inactivity_timeout > 0 and (rospy.Time.now() - self.last_command_time).to_sec() > self.inactivity_timeout:
                     rospy.loginfo("No hand pose received in " + str(self.inactivity_timeout) + " seconds. Going to ready pose...")
@@ -172,11 +172,11 @@ class KinovaTeleopDual(object):
                 self.rate.sleep()
                 continue
 
-            if left_vel_command is not None:
+            if not self.is_twist_msg_empty(left_vel_command):
                 rospy.loginfo_throttle(60, "Sending velocity commands to the left arm...")
                 lc.reach_arm_position(left_vel_command, self.pub_arm1_vel)
 
-            if right_vel_command is not None:
+            if not self.is_twist_msg_empty(right_vel_command):
                 rospy.loginfo_throttle(60, "Sending velocity commands to the right arm...")
                 lc.reach_arm_position(right_vel_command, self.pub_arm2_vel)
 
@@ -188,6 +188,10 @@ class KinovaTeleopDual(object):
             # Sleep for the remainder of the loop
             self.rate.sleep()
 
+    def is_twist_msg_empty(self, twist_msg):
+        return twist_msg is None or twist_msg.header.stamp == rospy.Time(0) or (
+            twist_msg.twist.linear.x == 0.0 and twist_msg.twist.linear.y == 0.0 and twist_msg.twist.linear.z == 0.0 and
+            twist_msg.twist.angular.x == 0.0 and twist_msg.twist.angular.y == 0.0 and twist_msg.twist.angular.z == 0.0)
 
     def arm1_teleop_callback(self, data):
         # Get the position and orientation of the hand
