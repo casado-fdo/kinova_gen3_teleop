@@ -56,9 +56,10 @@ class KinovaTeleopDual(object):
         self.moveit_arm_group.set_max_velocity_scaling_factor(self.moveit_max_vel)
         self.moveit_arm_group.set_max_acceleration_scaling_factor(self.moveit_max_acc)
         self.moveit_arm_group.set_num_planning_attempts(30)
-        self.moveit_arm_group.set_goal_position_tolerance(0.1)
-        self.moveit_arm_group.set_goal_orientation_tolerance(0.1)
-        self.moveit_arm_group.set_goal_joint_tolerance(0.1)
+        self.moveit_arm_group.set_planning_time(10.0)
+        self.moveit_arm_group.set_goal_position_tolerance(0.001)
+        self.moveit_arm_group.set_goal_orientation_tolerance(0.001)
+        self.moveit_arm_group.set_goal_joint_tolerance(0.001)
 
         # Robot reference frame
         self.arm1_base_link = rospy.get_param("arm1_base_link")
