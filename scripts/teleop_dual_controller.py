@@ -112,7 +112,7 @@ class KinovaTeleopDual(object):
             rospy.logerr("Failed to clear faults for right arm: " + str(e))
 
         # Setup the rate for the main loop
-        self.rate = rospy.Rate(15) # Hz
+        self.rate = rospy.Rate(12) # Hz
 
         # Handle user keyboard interrupt properly
         rospy.on_shutdown(self.signal_term_handler)
