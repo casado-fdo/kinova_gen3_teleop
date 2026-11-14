@@ -39,7 +39,10 @@ class KinovaTeleopDual(object):
         self.max_angular_vel = rospy.get_param("max_angular_vel") # rad/s
         self.mismatch_threshold = rospy.get_param("mismatch_threshold") # m
         self.inactivity_timeout = rospy.get_param("inactivity_timeout") # s (-1 for infinite)
+        self.home_after_idle_sec = float(rospy.get_param("home_after_idle_sec", -1.0)) # s after ready (-1 to disable)
         self.last_command_time = None
+        self.ready_since = None
+        self.at_home = False
         rospy.loginfo("Using teleop source: " + self.teleop_source + ", "
             "velocity scale factor: " + str(self.vel_scale_factor) + ", "
             "max linear vel: " + str(self.max_linear_vel) + ", max angular vel: " + str(self.max_angular_vel))
@@ -165,13 +168,37 @@ class KinovaTeleopDual(object):
                 if self.last_command_time != None and self.inactivity_timeout > 0 and (rospy.Time.now() - self.last_command_time).to_sec() > self.inactivity_timeout:
                     rospy.loginfo("No hand pose received in " + str(self.inactivity_timeout) + " seconds. Going to ready pose...")
                     # Go to "ready" pose
-                    self.go_to(self.ready_pose)
+                    if self.go_to(self.ready_pose):
+                        self.ready_since = rospy.Time.now()
                     self.last_command_time = None
+                elif self.ready_since is not None and self.home_after_idle_sec >= 0 and (rospy.Time.now() - self.ready_since).to_sec() > self.home_after_idle_sec:
+                    rospy.loginfo("No hand pose received in " + str(self.home_after_idle_sec) + " seconds after reaching the ready pose. Going to home pose...")
+                    # Go to "home" pose
+                    if self.go_to(self.home_pose):
+                        rospy.loginfo("Went to home pose successfully")
+                        self.at_home = True
+                    else:
+                        rospy.logerr("Failed to go home")
+                    self.ready_since = None
                 else:
                     self.stop(self.pub_arm1_vel)
                     self.stop(self.pub_arm2_vel)
                 self.rate.sleep()
                 continue
+
+            # If the arms were sent home while idle, return to the ready pose
+            # before following commands. Teleoperation itself never stops.
+            if self.at_home:
+                rospy.loginfo("Received commands while at home pose. Going to ready pose...")
+                if not self.go_to(self.ready_pose):
+                    rospy.logerr("Failed to go to ready pose")
+                self.at_home = False
+                # Use the freshest commands, which may have arrived during the move
+                right_vel_command = self.last_right_vel_command
+                left_vel_command = self.last_left_vel_command
+                if self.is_twist_msg_empty(right_vel_command) and self.is_twist_msg_empty(left_vel_command):
+                    self.rate.sleep()
+                    continue
 
             if not self.is_twist_msg_empty(left_vel_command):
                 rospy.loginfo_throttle(60, "Sending velocity commands to the left arm...")
@@ -185,6 +212,7 @@ class KinovaTeleopDual(object):
             self.last_right_vel_command = None
             self.last_left_vel_command = None
             self.last_command_time = rospy.Time.now()
+            self.ready_since = None
 
             # Sleep for the remainder of the loop
             self.rate.sleep()
