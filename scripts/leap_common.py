@@ -89,7 +89,7 @@ def scale_vel_log(vel, vel_scale_factor=1.0):
     return np.sign(vel) * np.log(1 + abs(vel) * vel_scale_factor) / np.log(1 + vel_scale_factor)
 
 
-def hand_pose_to_kinova_goal(hand_pose, tool_pose, pub_arm_goal, 
+def hand_pose_to_kinova_goal(hand_pose, tool_pose, pub_arm_goal,
                        base_frame, ref_frame, tf_buffer,
                        vel_scale_factor=1.0, max_linear_vel=1.0, max_angular_vel=1.57):
     '''Convert the hand pose goal to a kinova cartesian velocity command'''
@@ -104,7 +104,11 @@ def hand_pose_to_kinova_goal(hand_pose, tool_pose, pub_arm_goal,
     else:
         hand_pose_bf = hand_pose_rf
         tool_pose_bf = tool_pose
-    
+
+    if hand_pose_bf is None or tool_pose_bf is None:
+        rospy.logerr("Failed to transform the hand pose or the tool pose to the arm base frame")
+        return None
+
     # Calculate the velocity command to move the arm to the hand position
     # Linear velocity in m/s
     pos_x_diff = (hand_pose_bf.pose.position.x - tool_pose_bf.pose.position.x)
@@ -146,7 +150,10 @@ def hand_pose_to_kinova_goal(hand_pose, tool_pose, pub_arm_goal,
     arm_vel.twist.angular.y = np.clip(scale_vel_log(theta_y_diff), -max_angular_vel, max_angular_vel)
     arm_vel.twist.angular.z = scale_vel_log(theta_z_diff)
 
-    pub_arm_goal.publish(arm_vel)
+    if pub_arm_goal is not None:
+        pub_arm_goal.publish(arm_vel)
+
+    return arm_vel
 
 
 def reach_arm_position(arm_vel_command, pub_arm_vel):

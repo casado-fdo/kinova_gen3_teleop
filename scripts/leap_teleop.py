@@ -68,9 +68,9 @@ class KinovaTeleopSingle(object):
         self.leap_ws_max = rospy.get_param("leap_workspace_max")
 
         # Gripper setup
-        self.is_gripper_present = rospy.get_param(self.robot_name + "/is_gripper_present", False)
+        self.is_gripper_present = rospy.get_param("/" + self.robot_name + "/is_gripper_present", False)
         if self.control_gripper and self.is_gripper_present:
-            gripper_joint_names = rospy.get_param(self.robot_name + "/gripper_joint_names", [])
+            gripper_joint_names = rospy.get_param("/" + self.robot_name + "/gripper_joint_names", [])
             gripper_joint_name = gripper_joint_names[0]
             self.gripper_joint = self.moveit_robot.get_joint(gripper_joint_name)
             rospy.loginfo("Gripper control enabled")
@@ -203,9 +203,11 @@ class KinovaTeleopSingle(object):
             rospy.loginfo_throttle(60, "Sending velocity commands to the arm...")
 
             # Control the arm
-            lc.reach_arm_position(hand_pose, arm_state, self.pub_arm_vel,
-                                  self.arm_base_link, self.arm_ref_frame, self.tf_buffer,
-                                  self.vel_scale_factor, self.max_linear_vel, self.max_angular_vel)
+            arm_vel = lc.hand_pose_to_kinova_goal(hand_pose, arm_state, None,
+                                                  self.arm_base_link, self.arm_ref_frame, self.tf_buffer,
+                                                  self.vel_scale_factor, self.max_linear_vel, self.max_angular_vel)
+            if arm_vel is not None:
+                lc.reach_arm_position(arm_vel, self.pub_arm_vel)
 
             # Control the gripper
             if self.control_gripper and self.is_gripper_present:
