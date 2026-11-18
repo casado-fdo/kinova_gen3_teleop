@@ -2,12 +2,12 @@
 <package format="2">
   <name>kinova_gen3_teleop</name>
   <version>0.0.0</version>
-  <description>The kinova_gen3_teleop package</description>
+  <description>Teleoperation of Kinova Gen3 arms with a Leap Motion controller.</description>
 
   <!-- One maintainer tag required, multiple allowed, one person per tag -->
   <!-- Example:  -->
   <!-- <maintainer email="jane.doe@example.com">Jane Doe</maintainer> -->
-  <maintainer email="f.estevez-casado@imperial.ac.uk">Fernando Estevez Casado</maintainer>
+  <maintainer email="128595349+casado-fdo@users.noreply.github.com">Fernando Estevez Casado</maintainer>
 
 
   <!-- One license tag required, multiple allowed, one license per tag -->
@@ -53,6 +53,15 @@
   <depend>moveit_msgs</depend>
   <depend>moveit_ros_planning_interface</depend>
   <depend>kortex_driver</depend>
+  <exec_depend>control_msgs</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>leap_motion_controller</exec_depend>
+  <exec_depend>python3-numpy</exec_depend>
+  <exec_depend>rospy</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>tf</exec_depend>
+  <exec_depend>tf2_geometry_msgs</exec_depend>
+  <exec_depend>tf2_ros</exec_depend>
 
 
 
