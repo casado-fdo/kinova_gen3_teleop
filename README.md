@@ -3,7 +3,7 @@
 ROS package for teleoperating Kinova Gen3 arms with a Leap Motion controller.
 
 ## Overview
-The package provides a single-arm and a dual-arm stack. `leap_teleop.py` maps one Leap hand to one arm and controls a Robotiq 2F-85 gripper if one is present. In the dual-arm stack, `leap_to_kinova_dual.py` converts the two hands into Cartesian velocity commands and `teleop_dual_controller.py` forwards them to both arms, handles the MoveIt named poses and reacts to inactivity. `leap_common.py` contains the workspace mapping and TF helpers shared by both stacks.
+The package provides a single-arm and a dual-arm stack. `leap_teleop.py` maps one Leap hand to one arm and controls a Robotiq 2F-85 gripper if one is present. In the dual-arm stack, `leap_to_kinova_dual.py` converts the two hands into Cartesian velocity commands and `teleop_dual_controller.py` forwards them to both arms, handles the MoveIt named poses and reacts to inactivity.
 
 ## Prerequisites
 - ROS Noetic
@@ -92,9 +92,6 @@ The dual-arm stack uses the same MoveIt and teleoperation keys, with these diffe
 | `l_hand_workspace_min`, `l_hand_workspace_max`, `r_hand_workspace_min`, `r_hand_workspace_max` | Per-hand workspace in the Leap frame, m |
 | `home_after_idle_sec` | Seconds at the ready pose before going home; `-1` disables it (default) |
 
-## Notes
-- The TF tree must connect each arm base to `arm_ref_frame`. Missing transforms are reported in the log and stop command generation.
-- The single-arm node reads `is_gripper_present` and `gripper_joint_names` from the `/<robot_name>` namespace.
 
 ## License
 This project is licensed under the MIT License. See [`LICENSE`](LICENSE) for details.
